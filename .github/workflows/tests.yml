@@ -1,0 +1,53 @@
+# PDFToolkitCore test suite on every push to main, on a GitHub-hosted macOS runner.
+#
+# Hosted, not self-hosted: this repo is public, so hosted macOS minutes cost nothing, and the
+# self-hosted Mac is already shared by SyncCloud and PDF Utils.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Every commit gets its own verdict, so a break is bisectable to the exact SHA.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package-tests:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcode-select -p
+          swift --version
+
+      # The real-PDF corpus is committed, not generated at test time (see
+      # docs/testing-corpus.md), so CI never needs Chrome. A file missing from the
+      # bundle would otherwise surface as an opaque fatalError deep inside a test,
+      # so check it up front and say which.
+      - name: Check the real-PDF corpus is present
+        run: |
+          corpus=Tests/PDFToolkitCoreTests/Corpus
+          expected="acroform-xrefstream.pdf chrome-article.pdf encrypted-user.pdf
+                    outline-nested.pdf owner-restricted.pdf rotated-cropped.pdf
+                    scanned-receipt.pdf"
+          missing=0
+          for f in $expected; do
+            if [[ -s "$corpus/$f" ]]; then
+              printf '  ok  %-28s %s bytes\n' "$f" "$(stat -f%z "$corpus/$f")"
+            else
+              echo "  MISSING or empty: $corpus/$f"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Run PDFToolkitCore suite
+        run: swift test

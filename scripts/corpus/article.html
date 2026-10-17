@@ -1,0 +1,48 @@
+<!doctype html><meta charset="utf-8"><title>Quarterly Field Report</title>
+<style>
+body{font:13pt/1.55 Georgia,serif;margin:0;color:#111}
+h1{font:700 24pt Helvetica,sans-serif;margin:0 0 6pt}
+h2{font:700 15pt Helvetica,sans-serif;margin:18pt 0 4pt;color:#334}
+table{border-collapse:collapse;width:100%;margin:10pt 0;font:10pt Helvetica,sans-serif}
+th,td{border:1px solid #999;padding:4pt 6pt;text-align:left}
+th{background:#eee}
+.page{page-break-after:always}
+code{font:10pt Menlo,monospace;background:#f2f2f2}
+@page{size:Letter;margin:0.75in}
+</style>
+<div class="page">
+<h1>Quarterly Field Report</h1>
+<p>Prepared for the Northbridge survey team. This document exists to exercise a
+PDF toolchain against output from a browser print engine rather than a
+Quartz drawing context.</p>
+<h2>Summary</h2>
+<p>Sensor uptime held at CORPUSTOKEN-ALPHA across all three sites. The
+remaining sections record the per-site breakdown and the outstanding
+maintenance queue.</p>
+<table><tr><th>Site</th><th>Uptime</th><th>Incidents</th></tr>
+<tr><td>Northbridge</td><td>99.4%</td><td>2</td></tr>
+<tr><td>Kettle Flats</td><td>97.1%</td><td>7</td></tr>
+<tr><td>Dunmore</td><td>99.9%</td><td>0</td></tr></table>
+<p>See <a href="#maintenance">the maintenance queue</a> and the
+<a href="https://example.org/northbridge/spec">published specification</a>.</p>
+</div>
+<div class="page">
+<h2 id="maintenance">Maintenance Queue</h2>
+<p>Marker CORPUSTOKEN-BRAVO. Items are ordered by the date the fault was
+first observed, not by severity.</p>
+<ol><li>Replace the Kettle Flats humidity probe (<code>KF-H2</code>).</li>
+<li>Re-seat the Dunmore uplink antenna.</li>
+<li>Audit the Northbridge battery bank for cell drift.</li></ol>
+<p>Contact: <a href="mailto:field@example.org">field@example.org</a></p>
+</div>
+<div>
+<h2>Appendix A: Method</h2>
+<p>Marker CORPUSTOKEN-CHARLIE. Readings were sampled every ninety seconds and
+averaged into hourly buckets before the uptime figure was computed.</p>
+<!-- Seeded for the Find &amp; redact tests. 4111 1111 1111 1111 is the industry's
+     publicly published test card: 16 digits, Luhn-valid, issued to no one. The
+     card preset requires 13-19 digits AND a passing checksum, so a made-up
+     number would silently match nothing. -->
+<p>Sensitive line for redaction testing: Account 4111-1111-1111-1111 held by
+Dana Reyes, reachable at dana.reyes@example.org.</p>
+</div>
