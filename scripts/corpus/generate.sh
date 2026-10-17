@@ -37,9 +37,19 @@ if [[ -x "$chrome" ]]; then
         --print-to-pdf="$out_dir/chrome-article.pdf" \
         "file://$tmp_dir/article.html" 2>/dev/null
     echo "chrome-article.pdf: $(stat -f%z "$out_dir/chrome-article.pdf") bytes"
+
+    # The same producer again, for its internal links: Chrome writes every one as a NAMED
+    # destination resolved through the catalog `/Dests`, the shape a page-copy rebuild loses.
+    # `--headless=new` is what honours `--generate-pdf-document-outline`.
+    cp "$repo_root/scripts/corpus/linked-book.html" "$tmp_dir/linked-book.html"
+    "$chrome" --headless=new --disable-gpu --no-pdf-header-footer \
+        --generate-pdf-document-outline \
+        --print-to-pdf="$out_dir/linked-book.pdf" \
+        "file://$tmp_dir/linked-book.html" 2>/dev/null
+    echo "linked-book.pdf: $(stat -f%z "$out_dir/linked-book.pdf") bytes"
 else
-    echo "SKIPPED chrome-article.pdf — Google Chrome not installed."
-    echo "  The committed copy is left in place; install Chrome to refresh it."
+    echo "SKIPPED chrome-article.pdf and linked-book.pdf — Google Chrome not installed."
+    echo "  The committed copies are left in place; install Chrome to refresh them."
 fi
 
 echo "done. Commit the corpus and keep docs/testing-corpus.md in step."

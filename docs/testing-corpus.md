@@ -1,6 +1,6 @@
 # The real-PDF corpus
 
-Seven PDF files live under
+Eight PDF files live under
 `Tests/PDFToolkitCoreTests/Corpus/`. They are committed to the
 repository, loaded through `Bundle.module`, and exercised end-to-end by
 `RealCorpusTests.swift`.
@@ -29,7 +29,8 @@ tools warn about.
 
 | File | Pages | What it is kept for |
 | --- | --- | --- |
-| `chrome-article.pdf` | 3 | Produced by Chrome's Skia backend — the only input in the suite Apple did not write. Embedded subset fonts, real internal/external/mailto link annotations, and the seeded card number and email the Find & redact tests search for. |
+| `chrome-article.pdf` | 3 | Produced by Chrome's Skia backend, one of two inputs in the suite Apple did not write. Embedded subset fonts, real internal/external/mailto link annotations, and the seeded card number and email the Find & redact tests search for. |
+| `linked-book.pdf` | 5 | Chrome again, printed with `--generate-pdf-document-outline`. Ten internal links, **all named destinations** (`/Dest /two`, resolved through the catalog `/Dests`), running forward, backward and across pages, plus one external link and a heading outline. Each page carries its own `CORPUSTOKEN-BOOK-n` marker, so a test can check that a link lands on its own target's text. A page-copy rebuild leaves the catalog behind, so these are the links it loses. |
 | `acroform-xrefstream.pdf` | 2 | A genuine catalog `/AcroForm` (text field + checkbox, both with appearance streams) inside a PDF 1.6 **object stream** behind a **cross-reference stream**, plus an XMP `/Metadata` packet and a full Info dictionary. The only file whose objects must be inflated before the catalog is visible. |
 | `outline-nested.pdf` | 6 | A **nested** outline: 3 top-level entries, one with 3 children, plus a document title and an internal link. A flat outline cannot tell "kept the tree" from "kept a list". |
 | `rotated-cropped.pdf` | 4 | Three page sizes, four different `/Rotate` values, every crop box smaller than its media box **and at a non-zero origin**. |
@@ -56,8 +57,9 @@ Three generators feed it, split by what each file has to be real *about*:
   real encryptor — genuine glyph runs, a genuine JPEG, real encryption
   dictionaries. Compiled with `swiftc` rather than run as a `swift` script: the
   interpreter traps inside AppKit here.
-- Chrome headless prints `article.html`. If Chrome is not installed the step is
-  skipped with a warning and the committed copy is left in place.
+- Chrome headless prints `article.html` and `linked-book.html`. If Chrome is not
+  installed the step is skipped with a warning and the committed copies are left
+  in place.
 
 The corpus is **not** regenerated during `swift test`. CI must not depend on
 Chrome being installed, and a fixture rebuilt on every run can drift silently
@@ -70,7 +72,7 @@ deliberately, not as a habit.
 ## Adding a file
 
 Keep the set small — it is committed, and `RealCorpusIntegrityTests` caps the
-total at 512 KB (currently ~260 KB). Before adding one, check that no existing
+total at 512 KB (currently ~280 KB). Before adding one, check that no existing
 file can carry the trait instead.
 
 1. Add the generator step to the appropriate script.

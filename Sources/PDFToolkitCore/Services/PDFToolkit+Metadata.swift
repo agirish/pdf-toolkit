@@ -176,6 +176,7 @@ extension PDFToolkit {
         if let outline = doc.outlineRoot {
             clean.outlineRoot = outline
         }
+        remapInternalLinksOfFullCopy(from: doc, to: clean)
         clean.documentAttributes = attributes
         return clean.dataRepresentation()
     }

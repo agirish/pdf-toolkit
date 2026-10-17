@@ -26,8 +26,17 @@ import Testing
 enum RealCorpus: String, CaseIterable {
     /// Chrome/Skia-produced, 3 pages. Embedded subset font programs and real link
     /// annotations (internal, external, mailto) — neither of which Apple's writer
-    /// emits. The suite's only input from a foreign producer.
+    /// emits.
     case chromeArticle = "chrome-article.pdf"
+
+    /// Chrome-printed with `--generate-pdf-document-outline`, 5 pages, each with its
+    /// own `CORPUSTOKEN-BOOK-n` marker. Ten internal links, ALL written as named
+    /// destinations (`/Dest /two`, resolved through the catalog `/Dests`), running
+    /// forward, backward and across pages, plus one external link and a heading
+    /// outline. A page-copy rebuild leaves the catalog behind, so these are the
+    /// links it loses or misdirects; `chromeArticle` has only one, which too many
+    /// permutations keep right by accident.
+    case linkedBook = "linked-book.pdf"
 
     /// A genuine catalog `/AcroForm` (text field + checkbox, both with appearance
     /// streams) inside a PDF 1.6 *object stream* behind a cross-reference *stream*,
@@ -105,6 +114,9 @@ enum RealCorpus: String, CaseIterable {
         var allowsAssembly = true
         var hasForm = false
         var bookmarkCount = 0
+        /// Link annotations written as `/Dest /name` — a destination the catalog has
+        /// to resolve, which is the trait `linkedBook` is kept for.
+        var namedDestinationLinks = 0
         /// A token drawn on page 1 that must survive round-trips — or nil where the
         /// page has no text layer at all.
         var firstPageToken: String?
@@ -113,7 +125,10 @@ enum RealCorpus: String, CaseIterable {
     var traits: Traits {
         switch self {
         case .chromeArticle:
-            return Traits(pageCount: 3, firstPageToken: "CORPUSTOKEN-ALPHA")
+            return Traits(pageCount: 3, namedDestinationLinks: 1, firstPageToken: "CORPUSTOKEN-ALPHA")
+        case .linkedBook:
+            return Traits(pageCount: 5, bookmarkCount: 5, namedDestinationLinks: 10,
+                          firstPageToken: "CORPUSTOKEN-BOOK-0")
         case .acroFormXrefStream:
             return Traits(pageCount: 2, hasForm: true, firstPageToken: "CORPUSTOKEN-FORM")
         case .outlineNested:

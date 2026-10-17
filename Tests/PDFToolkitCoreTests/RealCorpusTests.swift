@@ -26,6 +26,11 @@ struct RealCorpusIntegrityTests {
         #expect(doc.isEncrypted == expected.isEncrypted)
         #expect(PDFToolkit.hasInteractiveForm(at: file.url) == expected.hasForm)
         #expect(PDFToolkit.bookmarkCount(at: file.url) == expected.bookmarkCount)
+        // Counted in the raw bytes, which is the only place the name is visible: PDFKit
+        // resolves it on read. Chrome writes neither object streams nor compressed
+        // annotation objects, so a byte count is exact for every file that has any.
+        let raw = String(decoding: try file.data, as: UTF8.self)
+        #expect(raw.matches(of: /\/Dest \/[A-Za-z]/).count == expected.namedDestinationLinks)
 
         if doc.isLocked { #expect(doc.unlock(withPassword: RealCorpus.userPassword)) }
         #expect(doc.pageCount == expected.pageCount)

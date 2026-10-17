@@ -1,0 +1,40 @@
+<!doctype html><meta charset="utf-8"><title>Linked Field Handbook</title>
+<style>
+body{font:13pt/1.55 Georgia,serif;margin:0;color:#111}
+h1{font:700 24pt Helvetica,sans-serif;margin:0 0 6pt}
+h2{font:700 17pt Helvetica,sans-serif;margin:0 0 6pt;color:#334}
+.page{page-break-after:always}
+@page{size:Letter;margin:0.75in}
+</style>
+<!-- Every internal link here is printed by Chrome as a NAMED destination
+     (`/Dest /two`, resolved through the catalog `/Dests` dictionary), which is
+     what most browser- and LaTeX-produced files use. Each page carries its own
+     CORPUSTOKEN-BOOK-n marker so a test can check a link lands on ITS page's text,
+     not merely on some page. Links run forward, backward and across several
+     pages, so no reorder or subset can keep them all pointing right by accident. -->
+<div class="page">
+<h1 id="contents">Linked Field Handbook</h1>
+<p>Marker CORPUSTOKEN-BOOK-0. Contents:</p>
+<ol><li><a href="#one">Siting</a></li><li><a href="#two">Power</a></li>
+<li><a href="#three">Uplink</a></li><li><a href="#four">Index</a></li></ol>
+</div>
+<div class="page">
+<h2 id="one">Siting</h2>
+<p>Marker CORPUSTOKEN-BOOK-1. Power arrangements follow in
+<a href="#two">the power chapter</a>; return to <a href="#contents">the contents</a>.</p>
+</div>
+<div class="page">
+<h2 id="two">Power</h2>
+<p>Marker CORPUSTOKEN-BOOK-2. The uplink depends on this; see
+<a href="#three">the uplink chapter</a>.</p>
+</div>
+<div class="page">
+<h2 id="three">Uplink</h2>
+<p>Marker CORPUSTOKEN-BOOK-3. Terms are defined in <a href="#four">the index</a>;
+site selection is covered in <a href="#one">the siting chapter</a>.</p>
+</div>
+<div>
+<h2 id="four">Index</h2>
+<p>Marker CORPUSTOKEN-BOOK-4. Back to <a href="#contents">the contents</a>, or read
+<a href="https://example.org/handbook">the published edition</a>.</p>
+</div>

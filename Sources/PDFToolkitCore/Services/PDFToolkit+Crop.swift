@@ -69,6 +69,7 @@ extension PDFToolkit {
             output.insert(copy, at: output.pageCount)
         }
         reattachOutline(from: source, to: output)
+        remapInternalLinksOfFullCopy(from: source, to: output)
         carryDocumentAttributes(from: source, to: output)
         guard let data = output.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
@@ -229,6 +230,7 @@ extension PDFToolkit {
             output.insert(copy, at: output.pageCount)
         }
         reattachOutline(from: source, to: output)
+        remapInternalLinksOfFullCopy(from: source, to: output)
         carryDocumentAttributes(from: source, to: output)
         guard let data = output.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput

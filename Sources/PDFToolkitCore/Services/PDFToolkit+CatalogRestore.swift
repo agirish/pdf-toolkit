@@ -60,6 +60,9 @@ extension PDFToolkit {
             guard let page = reopened.page(at: index)?.copy() as? PDFPage else { return data }
             rebuilt.insert(page, at: rebuilt.pageCount)
         }
+        // That copy is a page-copy rebuild too, so links already on the pages — the ones Redact keeps
+        // on the pages it copied rather than rasterized — need re-pointing like any other copy's.
+        remapInternalLinksOfFullCopy(from: reopened, to: rebuilt)
 
         // Destination points, like the link bounds in `sourceLinks`, are stored in the source's
         // unrotated user space while the rebuilt pages are emitted upright at a zero origin. A

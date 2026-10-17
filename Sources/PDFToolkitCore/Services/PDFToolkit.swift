@@ -465,6 +465,14 @@ public enum PDFToolkit {
         // dropping bookmarks whose target page wasn't extracted. (An interactive `/AcroForm` still
         // does not survive the page-copy rebuild — out of scope here.)
         remapOutline(from: source, to: out, sourceToOutput: sourceToOutput)
+        // Internal links have the same problem one level down: a copied link still aims at its
+        // target's SOURCE index, or at a named destination in a catalog the fresh document lacks.
+        remapInternalLinks(
+            from: source,
+            to: out,
+            copiedPages: pageIndices.enumerated().map { ($0.offset, $0.element) },
+            sourceToOutput: sourceToOutput
+        )
         // The fresh document starts with an empty info dictionary, so extracting (or reordering)
         // used to silently strip the document's Title/Author — the same catalog loss the rebuild
         // family had, and one that contradicts "Strip metadata on export" defaulting to OFF.
@@ -833,6 +841,7 @@ public enum PDFToolkit {
         if let outline = doc.outlineRoot {
             output.outlineRoot = outline
         }
+        remapInternalLinksOfFullCopy(from: doc, to: output)
         guard output.pageCount > 0, let data = output.dataRepresentation() else {
             throw PDFOperationError.protectionFailed
         }
@@ -1165,12 +1174,26 @@ public enum PDFToolkit {
         }
 
         guard output.pageCount > 0 else { throw PDFOperationError.redactionFailed }
+        // The untouched pages are copies, and their internal links need re-pointing like any other
+        // copy's (see ``remapInternalLinks(from:to:copiedPages:sourceToOutput:mappingPoint:)``). A
+        // link INTO a rasterized page must follow that page into display space, as bookmarks do.
+        let rasterized = Set(grouped.keys).union(options.forceRasterizePages)
+        remapInternalLinks(
+            from: source,
+            to: output,
+            copiedPages: (0..<source.pageCount).filter { !rasterized.contains($0) }.map { ($0, $0) },
+            sourceToOutput: Dictionary(uniqueKeysWithValues: (0..<source.pageCount).map { ($0, $0) })
+        ) { pageIndex, point in
+            guard rasterized.contains(pageIndex), let page = source.page(at: pageIndex) else { return point }
+            return displayPoint(point, cropBox: page.bounds(for: .cropBox), rotation: normalizedRotation(page.rotation))
+        }
         // Do not pass `saveTextFromOCROption`: PDFKit’s OCR-on-save pass re-encodes image-based pages and
         // reliably produced thumbnail-sized redacted pages in testing (even with screen-optimize off).
         guard let data = output.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }
-        // Bookmarks and the info dictionary are restored; links deliberately are NOT — see
+        // Bookmarks and the info dictionary are restored; the rasterized pages' links deliberately
+        // are NOT — see
         // ``restoringCatalog(_:from:restoreLinks:)``. A link's URL can disclose the very value the
         // user painted over, and a live hotspot over a burned-in black box is recoverable content.
         //
@@ -1184,7 +1207,7 @@ public enum PDFToolkit {
             data,
             from: source,
             restoreLinks: false,
-            displayMappedPages: Set(grouped.keys).union(options.forceRasterizePages)
+            displayMappedPages: rasterized
         )
     }
 
