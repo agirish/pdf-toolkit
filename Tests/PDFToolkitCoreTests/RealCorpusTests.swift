@@ -500,12 +500,14 @@ struct RealCorpusCompressTests {
 struct RealCorpusOCRTests {
     /// The only test in the suite where Vision has to read something that was
     /// genuinely rendered to pixels and re-encoded as JPEG.
-    @Test func ocrGivesARealScanASearchableTextLayer() throws {
+    @Test func ocrGivesARealScanASearchableTextLayer() async throws {
         let dir = FixtureDir()
         let out = dir.url("ocr.pdf")
-        let summary = try PDFToolkit.ocr(
-            inputURL: RealCorpus.scannedReceipt.url, outputURL: out, options: OCROptions()
-        )
+        let summary = try await VisionLane.run {
+            try PDFToolkit.ocr(
+                inputURL: RealCorpus.scannedReceipt.url, outputURL: out, options: OCROptions()
+            )
+        }
         #expect(summary.recognizedPages == 2)
         #expect(summary.skippedPages == 0)
 

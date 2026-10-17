@@ -49,5 +49,9 @@ jobs:
           done
           exit $missing
 
+      # The suite takes well under a minute here, so a hang fails this step in 10 minutes rather
+      # than using the whole job. A test that blocks every cooperative-pool thread hangs the whole
+      # process: see Tests/PDFToolkitCoreTests/VisionLane.swift.
       - name: Run PDFToolkitCore suite
+        timeout-minutes: 10
         run: swift test

@@ -66,6 +66,11 @@ extension PDFToolkit {
     /// to a bitmap, Apple's Vision text recognition runs over it on-device, and each recognized
     /// line is drawn back in invisible text mode at its detected position, sized so selection
     /// highlights match the printed words underneath.
+    ///
+    /// Blocks the calling thread while Vision recognizes each page, and Vision itself needs a free
+    /// thread from Swift's cooperative pool to finish. Never let concurrent calls block every
+    /// thread in that pool, which has one per core, or the process deadlocks. Call it from a GCD
+    /// queue; one serial queue keeps any number of callers safe.
     public static func ocrData(
         inputURL: URL,
         options: OCROptions,
