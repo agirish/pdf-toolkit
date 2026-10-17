@@ -320,7 +320,7 @@ import PDFKit
         let dir = FixtureDir()
         let base = dir.url("base.pdf"), src = dir.url("src.pdf"), out = dir.url("out.pdf")
         try PDFFixtures.writePDF(pageCount: 3, to: base)
-        let doc = try #require(PDFDocument(url: base))
+        let doc = try PDFFixtures.authoringCopy(of: base)
         let root = PDFOutline()
         let parent = PDFOutline()
         parent.label = "Parent"
@@ -350,7 +350,7 @@ import PDFKit
         let dir = FixtureDir()
         let base = dir.url("base.pdf"), src = dir.url("src.pdf"), out = dir.url("out.pdf")
         try PDFFixtures.writePDF(pageCount: 3, to: base)
-        let doc = try #require(PDFDocument(url: base))
+        let doc = try PDFFixtures.authoringCopy(of: base)
         let root = PDFOutline()
         let folder = PDFOutline()          // no destination — a pure grouping node
         folder.label = "Part One"
@@ -379,7 +379,7 @@ import PDFKit
         let dir = FixtureDir()
         let base = dir.url("base.pdf"), src = dir.url("src.pdf"), out = dir.url("out.pdf")
         try PDFFixtures.writePDF(pageCount: 3, to: base)
-        let doc = try #require(PDFDocument(url: base))
+        let doc = try PDFFixtures.authoringCopy(of: base)
         let root = PDFOutline()
         let folder = PDFOutline()
         folder.label = "Part One"
@@ -402,7 +402,7 @@ import PDFKit
         let dir = FixtureDir()
         let base = dir.url("base.pdf"), src = dir.url("src.pdf"), out = dir.url("out.pdf")
         try PDFFixtures.writePDF(pageCount: 2, to: base)
-        let doc = try #require(PDFDocument(url: base))
+        let doc = try PDFFixtures.authoringCopy(of: base)
         let root = PDFOutline()
         let web = PDFOutline()
         web.label = "Our site"
@@ -428,7 +428,7 @@ import PDFKit
         let dir = FixtureDir()
         let base = dir.url("base.pdf"), src = dir.url("src.pdf"), out = dir.url("out.pdf")
         try PDFFixtures.writePDF(pageCount: 3, to: base)
-        let doc = try #require(PDFDocument(url: base))
+        let doc = try PDFFixtures.authoringCopy(of: base)
         let root = PDFOutline()
         let web = PDFOutline()
         web.label = "Our site"
@@ -513,7 +513,7 @@ import PDFKit
         let dir = FixtureDir()
         let base = dir.url("base.pdf"), src = dir.url("src.pdf"), out = dir.url("out.pdf")
         try PDFFixtures.writePDF(pageCount: 3, to: base)
-        let doc = try #require(PDFDocument(url: base))
+        let doc = try PDFFixtures.authoringCopy(of: base)
         let root = PDFOutline()
         let parent = PDFOutline()
         parent.label = "Parent"

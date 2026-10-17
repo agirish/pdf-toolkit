@@ -60,6 +60,20 @@ enum PDFFixtures {
         return markers
     }
 
+    /// The PDF at `url` as a document a fixture can decorate — bookmarks, links, info fields — and
+    /// then write. Its pages are copied into a FRESH `PDFDocument` rather than opened in place: on
+    /// macOS 27, writing a document opened from a file whose page tree is unchanged re-emits that
+    /// file's original outline (none, for a marker PDF) and ignores the one set in memory, and
+    /// stamps no Producer or dates. Every outline fixture built the in-place way came back empty.
+    static func authoringCopy(of url: URL) throws -> PDFDocument {
+        let source = try #require(PDFDocument(url: url))
+        let doc = PDFDocument()
+        for i in 0..<source.pageCount {
+            doc.insert(try #require(source.page(at: i)?.copy() as? PDFPage), at: doc.pageCount)
+        }
+        return doc
+    }
+
     /// An `n`-page marker PDF carrying a top-level outline: one bookmark per `bookmarks` entry, each
     /// pointing at the given zero-based page (destination near that page's top edge). Lets
     /// outline-preservation tests build a source whose bookmarks a later operation must keep pointing
@@ -81,7 +95,7 @@ enum PDFFixtures {
             .appendingPathComponent("outline-base-\(UUID().uuidString).pdf")
         defer { try? FileManager.default.removeItem(at: base) }
         let markers = try writePDF(pageCount: n, to: base, size: size)
-        let doc = try #require(PDFDocument(url: base))
+        let doc = try PDFFixtures.authoringCopy(of: base)
         let root = PDFOutline()
         for (i, bookmark) in bookmarks.enumerated() {
             let child = PDFOutline()

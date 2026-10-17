@@ -15,9 +15,7 @@ import Testing
     private func writePopulatedFixture(in dir: FixtureDir) throws -> URL {
         let base = dir.url.appendingPathComponent("base.pdf")
         try PDFFixtures.writePDF(pageCount: 2, to: base)
-        guard let doc = PDFDocument(url: base) else {
-            throw PDFOperationError.couldNotOpen(base)
-        }
+        let doc = try PDFFixtures.authoringCopy(of: base)
         doc.documentAttributes = [
             PDFDocumentAttribute.titleAttribute: "Q3 Review",
             PDFDocumentAttribute.authorAttribute: "A. Person",
@@ -164,7 +162,7 @@ import Testing
         let dir = FixtureDir()
         let base = dir.url("base.pdf"), src = dir.url("outlined.pdf"), out = dir.url("cleaned.pdf")
         try PDFFixtures.writePDF(pageCount: 3, to: base)
-        let doc = try #require(PDFDocument(url: base))
+        let doc = try PDFFixtures.authoringCopy(of: base)
         let root = PDFOutline()
         for (i, item) in [("Intro", 0), ("Appendix", 2)].enumerated() {
             let child = PDFOutline()
@@ -264,7 +262,7 @@ import Testing
         let dir = FixtureDir()
         let base = dir.url("base.pdf"), src = dir.url("outlined.pdf")
         try PDFFixtures.writePDF(pageCount: 3, to: base)
-        let doc = try #require(PDFDocument(url: base))
+        let doc = try PDFFixtures.authoringCopy(of: base)
         let root = PDFOutline()
         for (i, item) in [("Intro", 0), ("Appendix", 2)].enumerated() {
             let child = PDFOutline()

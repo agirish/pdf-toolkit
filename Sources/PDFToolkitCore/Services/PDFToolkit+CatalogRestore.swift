@@ -47,9 +47,19 @@ extension PDFToolkit {
         // ladder, so a restore pass here would be paid once per rung.
         guard source.outlineRoot != nil || !attributes.isEmpty || !links.isEmpty else { return data }
 
-        guard let rebuilt = PDFDocument(data: data),
-              rebuilt.pageCount == source.pageCount
+        guard let reopened = PDFDocument(data: data),
+              reopened.pageCount == source.pageCount
         else { return data }
+        // Restore onto a FRESH document holding the rebuilt pages, never onto `reopened` itself. On
+        // macOS 27, writing a document opened from bytes whose page tree is unchanged re-emits the
+        // source catalog's outline and ignores the one set in memory — so the reattached bookmarks
+        // silently vanished (macOS 26 wrote them). A fresh document always serializes its own
+        // outline, which is why the extract/crop rebuilds were never affected.
+        let rebuilt = PDFDocument()
+        for index in 0..<reopened.pageCount {
+            guard let page = reopened.page(at: index)?.copy() as? PDFPage else { return data }
+            rebuilt.insert(page, at: rebuilt.pageCount)
+        }
 
         // Destination points, like the link bounds in `sourceLinks`, are stored in the source's
         // unrotated user space while the rebuilt pages are emitted upright at a zero origin. A

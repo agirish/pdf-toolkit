@@ -11,7 +11,7 @@ struct OutputFidelityWarningTests {
     private func pdfWithBookmarks(_ count: Int, in dir: FixtureDir, named name: String) throws -> URL {
         let plain = dir.url("plain-\(name)")
         try PDFFixtures.writePDF(pageCount: max(1, count), to: plain)
-        let doc = try #require(PDFDocument(url: plain))
+        let doc = try PDFFixtures.authoringCopy(of: plain)
         if count > 0 {
             let root = PDFOutline()
             for i in 0..<count {
@@ -33,7 +33,7 @@ struct OutputFidelityWarningTests {
         let dir = FixtureDir()
         let plain = dir.url("plain.pdf")
         try PDFFixtures.writePDF(pageCount: 2, to: plain)
-        let doc = try #require(PDFDocument(url: plain))
+        let doc = try PDFFixtures.authoringCopy(of: plain)
         let root = PDFOutline()
         let parent = PDFOutline()
         parent.label = "Part I"

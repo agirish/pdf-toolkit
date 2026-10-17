@@ -126,7 +126,7 @@ struct InteractiveFormFateTests {
 
         let plain = dir.url("plain.pdf")
         try PDFFixtures.writePDF(pageCount: 2, to: plain)
-        let doc = try #require(PDFDocument(url: plain))
+        let doc = try PDFFixtures.authoringCopy(of: plain)
         let root = PDFOutline()
         let child = PDFOutline()
         child.label = "Chapter 1"

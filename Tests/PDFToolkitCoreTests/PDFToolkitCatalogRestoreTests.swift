@@ -20,7 +20,7 @@ struct PDFToolkitCatalogRestoreTests {
         let plain = dir.url("plain-source.pdf")
         try PDFFixtures.writePDF(pageCount: 3, to: plain)
         let url = dir.url("rich.pdf")
-        let doc = try #require(PDFDocument(url: plain))
+        let doc = try PDFFixtures.authoringCopy(of: plain)
 
         let root = PDFOutline()
         for (i, label) in Self.bookmarkLabels.enumerated() {
@@ -184,7 +184,7 @@ struct PDFToolkitCatalogRestoreTests {
         let dir = FixtureDir()
         let plain = dir.url("plain.pdf")
         try PDFFixtures.writePDF(pageCount: 2, to: plain)
-        let doc = try #require(PDFDocument(url: plain))
+        let doc = try PDFFixtures.authoringCopy(of: plain)
 
         // Both pages get an awkward geometry so a wrong mapping cannot hide.
         for index in 0..<2 {
@@ -230,7 +230,7 @@ struct PDFToolkitCatalogRestoreTests {
         let dir = FixtureDir()
         let plain = dir.url("plain.pdf")
         try PDFFixtures.writePDF(pageCount: 2, to: plain)
-        let doc = try #require(PDFDocument(url: plain))
+        let doc = try PDFFixtures.authoringCopy(of: plain)
 
         let cropBox = CGRect(x: 50, y: 60, width: 400, height: 500)
         for index in 0..<2 {
@@ -287,7 +287,7 @@ struct PDFToolkitCatalogRestoreTests {
         let dir = FixtureDir()
         let base = dir.url("base.pdf"), src = dir.url("rotated.pdf")
         try PDFFixtures.writePDF(pageCount: 1, to: base)
-        let doc = try #require(PDFDocument(url: base))
+        let doc = try PDFFixtures.authoringCopy(of: base)
         let page = try #require(doc.page(at: 0))
         page.rotation = 90
         let root = PDFOutline()
@@ -322,7 +322,7 @@ struct PDFToolkitCatalogRestoreTests {
         let dir = FixtureDir()
         let base = dir.url("base.pdf"), src = dir.url("weblink.pdf")
         try PDFFixtures.writePDF(pageCount: 2, to: base)
-        let doc = try #require(PDFDocument(url: base))
+        let doc = try PDFFixtures.authoringCopy(of: base)
         let root = PDFOutline()
         let web = PDFOutline()
         web.label = "Our site"
@@ -345,7 +345,7 @@ struct PDFToolkitCatalogRestoreTests {
         let dir = FixtureDir()
         let base = dir.url("base.pdf"), src = dir.url("fitlink.pdf")
         try PDFFixtures.writePDF(pageCount: 2, to: base)
-        let doc = try #require(PDFDocument(url: base))
+        let doc = try PDFFixtures.authoringCopy(of: base)
         let target = try #require(doc.page(at: 1))
         target.rotation = 90
         let sentinel = CGFloat(kPDFDestinationUnspecifiedValue)
