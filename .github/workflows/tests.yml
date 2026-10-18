@@ -35,9 +35,9 @@ jobs:
       - name: Check the real-PDF corpus is present
         run: |
           corpus=Tests/PDFToolkitCoreTests/Corpus
-          expected="acroform-xrefstream.pdf chrome-article.pdf encrypted-user.pdf
-                    outline-nested.pdf owner-restricted.pdf rotated-cropped.pdf
-                    scanned-receipt.pdf"
+          expected="acroform-fieldkinds.pdf acroform-xrefstream.pdf chrome-article.pdf
+                    encrypted-user.pdf linked-book.pdf outline-nested.pdf
+                    owner-restricted.pdf rotated-cropped.pdf scanned-receipt.pdf"
           missing=0
           for f in $expected; do
             if [[ -s "$corpus/$f" ]]; then

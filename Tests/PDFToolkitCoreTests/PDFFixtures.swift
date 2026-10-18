@@ -432,6 +432,13 @@ extension PDFOperationError {
         case .encryptedInput: return "encryptedInput"
         case .permissionsForbidEditing: return "permissionsForbidEditing"
         case .couldNotEncodeOutput: return "couldNotEncodeOutput"
+        case .noFormValues: return "noFormValues"
+        case .unknownFormField: return "unknownFormField"
+        case .formFieldReadOnly: return "formFieldReadOnly"
+        case .formFieldNotFillable: return "formFieldNotFillable"
+        case .formValueNotAccepted: return "formValueNotAccepted"
+        case .formFillFailed: return "formFillFailed"
+        case .textOnRotatedPage: return "textOnRotatedPage"
         }
     }
 }

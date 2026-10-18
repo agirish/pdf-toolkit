@@ -44,6 +44,15 @@ enum RealCorpus: String, CaseIterable {
     /// file whose objects must be inflated before the catalog is even visible.
     case acroFormXrefStream = "acroform-xrefstream.pdf"
 
+    /// Every field kind form filling has to handle, behind a plain cross-reference
+    /// table: a nested text field (`applicant.name`), multiline with `/MaxLen`,
+    /// read-only, a checkbox that starts Off, a three-way radio group, a combo, an
+    /// editable combo, a list box, a signature and a push button — and `initials`,
+    /// one field with a widget on each page. All with appearance streams, plus an
+    /// outline, an internal link, XMP and Info, so a fill can be checked for keeping
+    /// them.
+    case acroFormFieldKinds = "acroform-fieldkinds.pdf"
+
     /// 6 pages under a NESTED outline — 3 top-level entries, one with 3 children —
     /// plus a document title and an internal link. Merge and Split warn about
     /// bookmarks; Delete/Extract/Reorder must re-point the survivors.
@@ -131,6 +140,8 @@ enum RealCorpus: String, CaseIterable {
                           firstPageToken: "CORPUSTOKEN-BOOK-0")
         case .acroFormXrefStream:
             return Traits(pageCount: 2, hasForm: true, firstPageToken: "CORPUSTOKEN-FORM")
+        case .acroFormFieldKinds:
+            return Traits(pageCount: 2, hasForm: true, bookmarkCount: 2, firstPageToken: "CORPUSTOKEN-FIELDS")
         case .outlineNested:
             return Traits(pageCount: 6, bookmarkCount: 6, firstPageToken: "CORPUSTOKEN-OUTLINE")
         case .rotatedCropped:

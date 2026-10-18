@@ -1,6 +1,6 @@
 # The real-PDF corpus
 
-Eight PDF files live under
+Nine PDF files live under
 `Tests/PDFToolkitCoreTests/Corpus/`. They are committed to the
 repository, loaded through `Bundle.module`, and exercised end-to-end by
 `RealCorpusTests.swift`.
@@ -32,6 +32,7 @@ tools warn about.
 | `chrome-article.pdf` | 3 | Produced by Chrome's Skia backend, one of two inputs in the suite Apple did not write. Embedded subset fonts, real internal/external/mailto link annotations, and the seeded card number and email the Find & redact tests search for. |
 | `linked-book.pdf` | 5 | Chrome again, printed with `--generate-pdf-document-outline`. Ten internal links, **all named destinations** (`/Dest /two`, resolved through the catalog `/Dests`), running forward, backward and across pages, plus one external link and a heading outline. Each page carries its own `CORPUSTOKEN-BOOK-n` marker, so a test can check that a link lands on its own target's text. A page-copy rebuild leaves the catalog behind, so these are the links it loses. |
 | `acroform-xrefstream.pdf` | 2 | A genuine catalog `/AcroForm` (text field + checkbox, both with appearance streams) inside a PDF 1.6 **object stream** behind a **cross-reference stream**, plus an XMP `/Metadata` packet and a full Info dictionary. The only file whose objects must be inflated before the catalog is visible. |
+| `acroform-fieldkinds.pdf` | 2 | Every field kind form filling handles, behind a plain cross-reference table: a nested text field (`applicant.name`), multiline with `/MaxLen`, read-only, a checkbox that starts Off, a three-way radio group, a combo, an editable combo, a list box, a combo whose items are `[export display]` pairs, a signature and a push button — and `initials`, **one field with a widget on each page**, where a fill that reaches only one widget looks right on page 1 and stale on page 2. Every widget has an appearance stream; an outline, an internal link, XMP and Info ride along so a fill can be checked for keeping them. |
 | `outline-nested.pdf` | 6 | A **nested** outline: 3 top-level entries, one with 3 children, plus a document title and an internal link. A flat outline cannot tell "kept the tree" from "kept a list". |
 | `rotated-cropped.pdf` | 4 | Three page sizes, four different `/Rotate` values, every crop box smaller than its media box **and at a non-zero origin**. |
 | `scanned-receipt.pdf` | 2 | Image-only: a JPEG of printed text with no text layer. The only file that makes OCR do real work, the only one Compress can genuinely shrink, and the one where a text search must legitimately find nothing. |
@@ -72,7 +73,7 @@ deliberately, not as a habit.
 ## Adding a file
 
 Keep the set small — it is committed, and `RealCorpusIntegrityTests` caps the
-total at 512 KB (currently ~280 KB). Before adding one, check that no existing
+total at 512 KB (currently ~289 KB). Before adding one, check that no existing
 file can carry the trait instead.
 
 1. Add the generator step to the appropriate script.

@@ -40,6 +40,13 @@ import Foundation
         .encryptedInput(URL(fileURLWithPath: "/tmp/locked.pdf")),
         .permissionsForbidEditing(URL(fileURLWithPath: "/tmp/restricted.pdf")),
         .couldNotEncodeOutput,
+        .noFormValues,
+        .unknownFormField("applicant.name"),
+        .formFieldReadOnly("account"),
+        .formFieldNotFillable("signature"),
+        .formValueNotAccepted(field: "country", value: "Mars"),
+        .formFillFailed("plan"),
+        .textOnRotatedPage(pageNumber: 2),
     ]
 
     @Test func listCoversEveryCase() {
@@ -49,7 +56,7 @@ import Foundation
         // `all` against a bare literal (22), so it kept passing while the enum grew to 29 and 7 messages
         // went unchecked. Here the count is derived from `all` itself, and distinctness proves no two
         // entries collapse to the same kind (which would let a duplicate hide a missing case).
-        #expect(all.count == 30)
+        #expect(all.count == 37)
         #expect(Set(all.map(\.kind)).count == all.count)
     }
 
@@ -66,7 +73,9 @@ import Foundation
              .watermarkTextRequired, .watermarkImageRequired, .watermarkFailed, .noFillSignItems,
              .fillSignFailed, .passwordRequired, .incorrectPassword, .notEncrypted, .protectionFailed,
              .metadataEncrypted, .couldNotOpenImage, .cropTooSmall, .ocrFailed, .encryptedInput,
-             .permissionsForbidEditing, .couldNotEncodeOutput:
+             .permissionsForbidEditing, .couldNotEncodeOutput, .noFormValues, .unknownFormField,
+             .formFieldReadOnly, .formFieldNotFillable, .formValueNotAccepted, .formFillFailed,
+             .textOnRotatedPage:
             break
         }
     }

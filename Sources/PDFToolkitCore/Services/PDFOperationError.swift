@@ -31,6 +31,13 @@ public enum PDFOperationError: LocalizedError {
     case encryptedInput(URL)
     case permissionsForbidEditing(URL)
     case couldNotEncodeOutput
+    case noFormValues
+    case unknownFormField(String)
+    case formFieldReadOnly(String)
+    case formFieldNotFillable(String)
+    case formValueNotAccepted(field: String, value: String)
+    case formFillFailed(String)
+    case textOnRotatedPage(pageNumber: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -94,6 +101,20 @@ public enum PDFOperationError: LocalizedError {
             return "“\(url.lastPathComponent)” has owner-password restrictions that forbid changing its pages. Remove them first (Password Protect → Remove password), then try again."
         case .couldNotEncodeOutput:
             return "Could not build the result PDF in memory."
+        case .noFormValues:
+            return "Fill in at least one field, or place some text or a signature, before saving."
+        case .unknownFormField(let name):
+            return "This form has no field named “\(name)”."
+        case .formFieldReadOnly(let name):
+            return "The field “\(name)” is read-only, so it can’t be filled."
+        case .formFieldNotFillable(let name):
+            return "The field “\(name)” can’t be filled here. Signatures, buttons and lists whose items have separate export values aren’t supported."
+        case .formValueNotAccepted(let name, let value):
+            return "The field “\(name)” does not accept “\(value)”."
+        case .formFillFailed(let name):
+            return "The field “\(name)” did not take its new value. The file was not changed."
+        case .textOnRotatedPage(let page):
+            return "Typed text can’t be added to page \(page) while keeping the form fillable, because the page is rotated. Use Fill & Sign, which flattens the form."
         }
     }
 }
