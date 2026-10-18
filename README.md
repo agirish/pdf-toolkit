@@ -108,6 +108,8 @@ export value belongs). Every value is checked before anything changes.
   reopen, PDFKit itself reads the radio group as all off. So buttons are left alone in PDFKit and
   their `/AS` and `/V` are set as names in an appended incremental update. The producer's
   appearances are kept. Names are never encrypted, so this works on an encrypted file too.
+  PDFKit on macOS 26 writes each widget twice, once for the page and once under the field tree,
+  and reads the field back from the tree, so both copies are set.
 - No `/NeedAppearances` is set: every changed widget has an appearance showing its new value.
 - **Checking it yourself:** PDFKit draws a widget from `/V`, not from its appearance stream. Preview,
   a `PDFView`, or flattening through this package shows the new value even when the appearance is
@@ -155,7 +157,7 @@ compressed cross-reference stream, a form with every field kind, a nested outlin
 cropped off the origin, a scan, and both kinds of encryption. See [docs/testing-corpus.md](docs/testing-corpus.md), and
 `scripts/corpus/generate.sh` to regenerate it.
 
-On macOS 27.0.1 all 484 tests pass. (0.1.0 had 31 failures there, all about bookmarks, links or Info
+All 485 tests pass on macOS 27.0.1 and on the hosted macOS 26.6.2 runner. (0.1.0 had 31 failures there, all about bookmarks, links or Info
 fields surviving a PDFKit write; 0.1.1 fixed them.)
 
 ## License

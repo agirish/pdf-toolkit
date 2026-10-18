@@ -458,6 +458,49 @@ extension PDFToolkit {
                     unset.remove(name)
                 }
             }
+            // PDFKit on macOS 26 writes each widget TWICE — once where the page's `/Annots` points,
+            // once more under the `/AcroForm` field tree — and reads a field back from the tree
+            // (measured on the hosted macos-26 runner, 26.6.2). macOS 27 writes one object, reached
+            // both ways. So the field tree is walked too, and every copy is set the same way.
+            if let catalog = cg.catalog {
+                var acroForm: CGPDFDictionaryRef?
+                var fields: CGPDFArrayRef?
+                if CGPDFDictionaryGetDictionary(catalog, "AcroForm", &acroForm), let acroForm,
+                   CGPDFDictionaryGetArray(acroForm, "Fields", &fields), let fields {
+                    var visited = Set<Int>()
+                    func walk(_ objects: [Int], _ nodes: CGPDFArrayRef, prefix: String?) throws {
+                        // The raw array and CoreGraphics' are the same bytes, so position i
+                        // names the same node in both.
+                        guard objects.count == CGPDFArrayGetCount(nodes) else {
+                            throw PDFOperationError.couldNotEncodeOutput
+                        }
+                        for (i, object) in objects.enumerated() where visited.insert(object).inserted {
+                            var node: CGPDFDictionaryRef?
+                            guard CGPDFArrayGetDictionary(nodes, i, &node), let node else { continue }
+                            let partial = partialName(of: node)
+                            let name = partial.map { p in prefix.map { "\($0).\(p)" } ?? p } ?? prefix
+                            if let name, let state = states[name] {
+                                if try partial != nil || update.hasKey("V", inObject: object) {
+                                    update.setName("V", to: state, inObject: object)
+                                }
+                                var subtype: UnsafePointer<CChar>?
+                                if CGPDFDictionaryGetName(node, "Subtype", &subtype), let subtype,
+                                   String(cString: subtype) == "Widget" {
+                                    let onStates = appearanceStates(of: node).filter { $0 != "Off" }
+                                    let isOn = onStates.isEmpty ? state != "Off" : onStates.contains(state)
+                                    update.setName("AS", to: isOn ? state : "Off", inObject: object)
+                                }
+                            }
+                            var kids: CGPDFArrayRef?
+                            if CGPDFDictionaryGetArray(node, "Kids", &kids), let kids {
+                                try walk(try update.kids(of: object), kids, prefix: name)
+                            }
+                        }
+                    }
+                    try walk(try update.formFieldObjects(), fields, prefix: nil)
+                }
+            }
+
             if let missing = unset.sorted().first { throw PDFOperationError.formFillFailed(missing) }
             return try update.appended()
         } catch is PDFAppendedUpdate.Failure {

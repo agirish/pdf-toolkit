@@ -457,6 +457,58 @@ struct FormFillTests {
     }
 }
 
+/// macOS 26's PDFKit writes each widget twice — one object where the page's `/Annots` points,
+/// another under `/AcroForm /Fields` — and reads a field back from the field tree (measured on the
+/// hosted macos-26 runner). Setting only the page's copy left PDFKit reading the old state. This
+/// builds that shape by hand, so the rule is pinned on any OS.
+struct FormTwinWidgetTests {
+    private static func twinWidgetPDF() -> Data {
+        let widget = "<< /Type /Annot /Subtype /Widget /FT /Btn /T (box) /V /Off /AS /Off "
+            + "/Rect [72 600 88 616] /F 4 /AP << /N << /Yes 6 0 R /Off 7 0 R >> >> >>"
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R] >>",
+            widget,   // 4: the page's copy
+            widget,   // 5: the field tree's copy
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 16 16] /Length 15 >>\nstream\n0 0 16 16 re f\nendstream",
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 16 16] /Length 0 >>\nstream\n\nendstream",
+        ]
+        var pdf = "%PDF-1.7\n"
+        var offsets: [Int] = []
+        for (i, body) in objects.enumerated() {
+            offsets.append(pdf.utf8.count)
+            pdf += "\(i + 1) 0 obj\n\(body)\nendobj\n"
+        }
+        let xref = pdf.utf8.count
+        pdf += "xref\n0 \(objects.count + 1)\n0000000000 65535 f \n"
+        for o in offsets { pdf += String(format: "%010d 00000 n \n", o) }
+        pdf += "trailer\n<< /Size \(objects.count + 1) /Root 1 0 R >>\nstartxref\n\(xref)\n%%EOF\n"
+        return Data(pdf.utf8)
+    }
+
+    /// `/AS` and `/V` of object `number`, read through the raw parser.
+    private static func state(of number: Int, in data: Data) throws -> (String?, String?) {
+        let raw = try PDFAppendedUpdate(data)
+        let value = try raw.object(number).value
+        func name(_ key: String) -> String? {
+            if case .name(let n)? = value[key] { return n }
+            return nil
+        }
+        return (name("AS"), name("V"))
+    }
+
+    @Test func bothCopiesOfAWidgetAreSet() throws {
+        let source = Self.twinWidgetPDF()
+        #expect(try Self.state(of: 4, in: source) == ("Off", "Off"))
+        #expect(try Self.state(of: 5, in: source) == ("Off", "Off"))
+
+        let filled = try PDFToolkit.settingButtonStates(["box": "Yes"], in: source)
+        #expect(try Self.state(of: 4, in: filled) == ("Yes", "Yes"))
+        #expect(try Self.state(of: 5, in: filled) == ("Yes", "Yes"))
+    }
+}
+
 // MARK: - Permissions
 
 struct FormFillPermissionTests {
@@ -638,9 +690,12 @@ struct FormFillItemTests {
             #expect(try FormFixture.widgetCount(data) == FormFixture.widgetCount(RealCorpus.acroFormFieldKinds.data))
             #expect(try FormFixture.fields(data, in: dir)["applicant.name"]?.value == "Grace Hopper")
 
-            // The page itself was not redrawn: its content stream is the original's byte for byte; the
-            // typed text lives in the annotation until something flattens it.
-            #expect(try FormFixture.pageContents(data, page: 0) == FormFixture.pageContents(RealCorpus.acroFormFieldKinds.data, page: 0))
+            // The typed text lives in the annotation, not the page, until something flattens it.
+            // (Not a byte comparison with the source: on macOS 26 PDFKit re-renders every page's
+            // content stream on any in-place save, items or none.)
+            let contents = String(decoding: try FormFixture.pageContents(data, page: 0), as: UTF8.self)
+            #expect(contents.contains("CORPUSTOKEN-FIELDS"))
+            #expect(!contents.contains("Lisbon"))
             #expect(try FormFixture.flattenedText(data, in: dir)[0].contains("Signed in Lisbon"))
         }
     }

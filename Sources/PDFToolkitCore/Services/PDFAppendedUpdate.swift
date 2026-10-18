@@ -143,6 +143,26 @@ struct PDFAppendedUpdate {
         }
     }
 
+    /// The object number of each top-level field in the catalog's `/AcroForm /Fields`, in order.
+    func formFieldObjects() throws -> [Int] {
+        guard let root = trailer["Root"]?.ref else { throw Failure.unreadable("no /Root") }
+        guard let acroForm = try resolve(try object(root.0).value["AcroForm"]),
+              case .array(let fields)? = try resolve(acroForm["Fields"]) else { return [] }
+        return try fields.map {
+            guard let (n, _) = $0.ref else { throw Failure.unreadable("direct field in /Fields") }
+            return n
+        }
+    }
+
+    /// The object number of each entry in an object's `/Kids`, in order.
+    func kids(of number: Int) throws -> [Int] {
+        guard case .array(let kids)? = try resolve(try object(number).value["Kids"]) else { return [] }
+        return try kids.map {
+            guard let (n, _) = $0.ref else { throw Failure.unreadable("direct kid of object \(number)") }
+            return n
+        }
+    }
+
     /// The `/Parent` reference of an object, if any.
     func parent(of number: Int) throws -> Int? {
         try object(number).value["Parent"]?.ref?.0
