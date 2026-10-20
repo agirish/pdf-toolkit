@@ -362,7 +362,7 @@ extension PDFToolkit {
         case .text(let text):
             let annotation = PDFAnnotation(bounds: rect, forType: .freeText, withProperties: nil)
             annotation.contents = text.string
-            annotation.font = scriptOrSystemFont(size: max(4, text.fontSize), script: text.isScript)
+            annotation.font = font(size: max(4, text.fontSize), script: text.isScript, font: text.font)
             annotation.fontColor = NSColor(srgbRed: text.red, green: text.green, blue: text.blue, alpha: 1)
             annotation.color = .clear
             let border = PDFBorder()

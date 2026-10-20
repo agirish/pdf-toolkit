@@ -1022,7 +1022,7 @@ public enum PDFToolkit {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byWordWrapping
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: scriptOrSystemFont(size: max(4, text.fontSize), script: text.isScript),
+            .font: font(size: max(4, text.fontSize), script: text.isScript, font: text.font),
             .foregroundColor: color,
             .paragraphStyle: paragraph,
         ]
@@ -1035,6 +1035,24 @@ public enum PDFToolkit {
     /// A handwriting face for typed signatures, falling back down a chain and finally to an italic
     /// system font so a machine missing the script fonts still renders something signature-like.
     public static func scriptOrSystemFont(size: CGFloat, script: Bool) -> NSFont {
+        font(size: size, script: script, font: nil)
+    }
+
+    /// **The face a ``FillSignText`` draws in**: `font` when this Mac has it, else
+    /// ``scriptOrSystemFont(size:script:)``'s.
+    public static func font(size: CGFloat, script: Bool, font: FillSignFont?) -> NSFont {
+        switch font {
+        case .named(let name)?:
+            if let found = NSFont(name: name, size: size) { return found }
+        case .systemRounded?:
+            if let rounded = NSFont.systemFont(ofSize: size).fontDescriptor.withDesign(.rounded) {
+                return NSFont(descriptor: rounded, size: size) ?? NSFont.systemFont(ofSize: size)
+            }
+        case .systemMonospaced?:
+            return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        case nil:
+            break
+        }
         guard script else { return NSFont.systemFont(ofSize: size) }
         for name in ["SnellRoundhand", "SavoyeLetPlain", "Zapfino", "BradleyHandITCTT-Bold"] {
             if let font = NSFont(name: name, size: size) { return font }

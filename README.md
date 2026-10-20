@@ -86,6 +86,13 @@ from the file, so the catalog `/AcroForm`, every widget, the outline, links, XMP
 encryption survive. Its `items` (placed text and drawn signatures) become FreeText and Ink
 annotations, not page content.
 
+**Faces.** `FillSignText.font` names the face a run is drawn in (`.named("SavoyeLetPlain")`, or the
+system font's rounded or monospaced design); `nil`, or a face the Mac lacks, is the default — a
+script chain for a typed signature, the system font for text. Both paths embed the face. Measured
+2026-10-19 in Preview, Chrome and Acrobat: a FreeText annotation loses glyphs CoreText reaches only
+by ligature (SignPainter's "ir" and "or"), and a face known only by a private name (New York) cannot
+be named in one, so it comes out as Helvetica. Text drawn into the page keeps both.
+
 **Permissions.** Filling needs `allowsFormFieldEntry`, not `allowsDocumentAssembly`: many forms
 forbid editing but allow filling (one real form surveyed for this release carries `0xf7`: form entry yes, assembly no).
 `items` also need `allowsCommenting`. Either missing throws `permissionsForbidEditing`; a locked file

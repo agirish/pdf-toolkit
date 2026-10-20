@@ -1,6 +1,17 @@
 import CoreGraphics
 import Foundation
 
+/// The face a ``FillSignText`` is drawn in, when it is not the default one.
+public enum FillSignFont: Hashable, Sendable {
+    /// A font by its PostScript name — "SavoyeLetPlain", "Charter-Roman". A name this Mac doesn't
+    /// have falls back to the default face for the run (``FillSignText/isScript``).
+    case named(String)
+    /// The system font's rounded design.
+    case systemRounded
+    /// The system font's monospaced design.
+    case systemMonospaced
+}
+
 /// A typed-text run placed on a page. Baked as **selectable vector text** (CoreText), not a bitmap.
 public struct FillSignText: Hashable, Sendable {
     public var string: String
@@ -11,6 +22,9 @@ public struct FillSignText: Hashable, Sendable {
     public var blue: CGFloat
     /// When true, the run is drawn in a handwriting/script face — a "typed signature".
     public var isScript: Bool
+    /// The face to draw in, tried first; `nil`, or a face this Mac lacks, is the default one —
+    /// the script chain for a typed signature, the system font for anything else.
+    public var font: FillSignFont?
 
     public init(
         string: String,
@@ -18,7 +32,8 @@ public struct FillSignText: Hashable, Sendable {
         red: CGFloat,
         green: CGFloat,
         blue: CGFloat,
-        isScript: Bool = false
+        isScript: Bool = false,
+        font: FillSignFont? = nil
     ) {
         self.string = string
         self.fontSize = fontSize
@@ -26,6 +41,7 @@ public struct FillSignText: Hashable, Sendable {
         self.green = green
         self.blue = blue
         self.isScript = isScript
+        self.font = font
     }
 
     public var hasInk: Bool {
