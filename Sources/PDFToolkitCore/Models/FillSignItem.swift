@@ -77,13 +77,33 @@ public struct FillSignSignature: Hashable, Sendable {
     }
 }
 
-/// One thing the user dropped onto a page: either typed text or a drawn signature, positioned by a
-/// rectangle in that page's crop-box space (PDF user space, y-up) — the same coordinate convention
+/// **A filled rectangle that covers what the page has under it** — the patch under a correction,
+/// whose new words are a ``FillSignText`` placed over it. Its colour is the page's own under the
+/// words, so a flat background hides the old words; the item's rect is the patch.
+///
+/// Drawn into the page, under every text run and signature on that page whatever the items' order
+/// (``PDFToolkit/fillAndSignData(inputURL:items:)``). It hides the old words; it does not remove
+/// them, so search and copy still find them in the result.
+public struct FillSignPatch: Hashable, Sendable {
+    public var red: CGFloat
+    public var green: CGFloat
+    public var blue: CGFloat
+
+    public init(red: CGFloat, green: CGFloat, blue: CGFloat) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
+}
+
+/// One thing the user dropped onto a page: typed text, a drawn signature or a patch, positioned by
+/// a rectangle in that page's crop-box space (PDF user space, y-up) — the same coordinate convention
 /// as ``RedactionMark`` so the placement canvas and the exporter agree.
 public struct FillSignItem: Identifiable, Hashable, Sendable {
     public enum Content: Hashable, Sendable {
         case text(FillSignText)
         case signature(FillSignSignature)
+        case patch(FillSignPatch)
     }
 
     public let id: UUID
@@ -105,11 +125,18 @@ public struct FillSignItem: Identifiable, Hashable, Sendable {
         return false
     }
 
-    /// Whether this item would actually draw anything (non-blank text / at least one stroke).
+    public var isPatch: Bool {
+        if case .patch = content { return true }
+        return false
+    }
+
+    /// Whether this item would actually draw anything (non-blank text / at least one stroke / a
+    /// patch with an area).
     public var hasInk: Bool {
         switch content {
         case .text(let t): return t.hasInk
         case .signature(let s): return s.hasInk
+        case .patch: return rect.width > 0 && rect.height > 0
         }
     }
 }

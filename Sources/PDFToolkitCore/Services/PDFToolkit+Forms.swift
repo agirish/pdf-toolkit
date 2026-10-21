@@ -15,7 +15,7 @@ import PDFKit
 //   on one page and the old one on the other.
 // - Checkboxes and radio buttons do NOT go through PDFKit: its writer collapses their on/off
 //   appearances and leaves `/AS` stale. They are set afterwards by ``PDFAppendedUpdate``.
-// - Placed `items` become FreeText and Ink annotations, so they never flatten the page.
+// - Placed `items` become FreeText, Ink and Square annotations, so they never flatten the page.
 extension PDFToolkit {
     // MARK: - Listing
 
@@ -217,10 +217,10 @@ extension PDFToolkit {
     ///   options (unless the field allows custom values), a radio value that is not one of its
     ///   export values, or text longer than the field's `/MaxLen` each throw — nothing is skipped
     ///   silently.
-    /// - `items` are placed text and drawn signatures, added as FreeText and Ink annotations rather
-    ///   than drawn into the page, so they too leave the form fillable. Typed text on a page with a
-    ///   `/Rotate` throws ``PDFOperationError/textOnRotatedPage(pageNumber:)``: PDFKit would write
-    ///   it sideways.
+    /// - `items` are placed text, drawn signatures and patches, added as FreeText, Ink and Square
+    ///   annotations rather than drawn into the page, so they too leave the form fillable. Typed
+    ///   text on a page with a `/Rotate` throws ``PDFOperationError/textOnRotatedPage(pageNumber:)``:
+    ///   PDFKit would write it sideways.
     ///
     /// The file is opened from `inputURL` and mutated in place, so everything else it carries — the
     /// catalog `/AcroForm`, its widgets, the outline, links, XMP and Info, and any encryption —
@@ -300,7 +300,8 @@ extension PDFToolkit {
         // Counted BEFORE adding: PDFKit drops an annotation it is not allowed to add without a word,
         // so the in-memory document cannot be asked afterwards.
         var expectedItems = itemAnnotationCounts(in: doc)
-        for item in inked {
+        // Patches first: an annotation added later is drawn over one added earlier.
+        for item in inked.filter(\.isPatch) + inked.filter({ !$0.isPatch }) {
             doc.page(at: item.pageIndex)?.addAnnotation(formItemAnnotation(item))
             expectedItems[item.pageIndex, default: 0] += 1
         }
@@ -355,10 +356,22 @@ extension PDFToolkit {
 
     /// A placed item as an annotation: typed text as FreeText (PDFKit writes its appearance stream
     /// with the text in it), a drawn signature as Ink built from the same normalized strokes Fill &
-    /// Sign strokes, with the same pen width and round caps.
+    /// Sign strokes, with the same pen width and round caps, and a patch as a borderless Square
+    /// filled with its colour. Any app can delete an annotation, so a patch saved this way can be
+    /// peeled off the words it covers.
     static func formItemAnnotation(_ item: FillSignItem) -> PDFAnnotation {
         let rect = item.rect
         switch item.content {
+        case .patch(let patch):
+            let annotation = PDFAnnotation(bounds: rect, forType: .square, withProperties: nil)
+            let color = NSColor(srgbRed: patch.red, green: patch.green, blue: patch.blue, alpha: 1)
+            annotation.color = color
+            annotation.interiorColor = color
+            let border = PDFBorder()
+            border.lineWidth = 0
+            annotation.border = border
+            annotation.shouldPrint = true
+            return annotation
         case .text(let text):
             let annotation = PDFAnnotation(bounds: rect, forType: .freeText, withProperties: nil)
             annotation.contents = text.string
@@ -398,11 +411,11 @@ extension PDFToolkit {
         }
     }
 
-    /// How many FreeText and Ink annotations each page carries.
+    /// How many FreeText, Ink and Square annotations each page carries.
     private static func itemAnnotationCounts(in doc: PDFDocument) -> [Int: Int] {
         var counts: [Int: Int] = [:]
         for i in 0..<doc.pageCount {
-            counts[i] = (doc.page(at: i)?.annotations ?? []).filter { $0.type == "FreeText" || $0.type == "Ink" }.count
+            counts[i] = (doc.page(at: i)?.annotations ?? []).filter { ["FreeText", "Ink", "Square"].contains($0.type) }.count
         }
         return counts
     }

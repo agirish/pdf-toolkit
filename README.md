@@ -10,7 +10,7 @@ It was cut from pdf-utils at `7828fcb`. PDF Utils itself now depends on this pac
 the same code.
 
 ```swift
-.package(url: "https://github.com/agirish/pdf-toolkit", exact: "0.2.0")
+.package(url: "https://github.com/agirish/pdf-toolkit", exact: "0.4.0")
 // target dependency:
 .product(name: "PDFToolkitCore", package: "pdf-toolkit")
 ```
@@ -92,6 +92,14 @@ script chain for a typed signature, the system font for text. Both paths embed t
 2026-10-19 in Preview, Chrome and Acrobat: a FreeText annotation loses glyphs CoreText reaches only
 by ligature (SignPainter's "ir" and "or"), and a face known only by a private name (New York) cannot
 be named in one, so it comes out as Helvetica. Text drawn into the page keeps both.
+
+**Patches.** `FillSignItem.Content.patch(FillSignPatch)` is a rectangle filled with an sRGB colour: the
+cover under a correction, with a text run placed over it. `fillAndSignData` draws a page's patches
+before its text and signatures, whatever the order of `items`. A patch hides what is under it and
+removes nothing: the covered words stay in the page's text, and search and copy still find them. To
+remove them, rasterize the page with `redactData(inputURL:marks:options:)` and `forceRasterizePages`.
+`fillFormData` adds a patch as a borderless Square annotation, before the page's other new items so
+they are drawn over it; any app can delete it.
 
 **Permissions.** Filling needs `allowsFormFieldEntry`, not `allowsDocumentAssembly`: many forms
 forbid editing but allow filling (one real form surveyed for this release carries `0xf7`: form entry yes, assembly no).

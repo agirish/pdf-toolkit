@@ -907,7 +907,7 @@ public enum PDFToolkit {
         return restoringCatalog(pdfData as Data, from: source, restoreLinks: true)
     }
 
-    /// Bakes placed text and drawn signatures onto their pages and writes a new PDF.
+    /// Bakes placed text, drawn signatures and patches onto their pages and writes a new PDF.
     ///
     /// Built exactly like ``watermark``: each page is redrawn as **vector** content with
     /// `drawPDFPage` (so the underlying text stays selectable) and its visible annotations are
@@ -917,6 +917,8 @@ public enum PDFToolkit {
     /// the user saw, honoring page rotation and crop just like redaction fills.
     /// Typed runs are drawn with CoreText (they remain selectable, searchable vector text); drawn
     /// signatures are stroked as vector paths from their normalized polylines — never rasterized.
+    /// Patches are filled rectangles, drawn first on their page so the text placed over them shows;
+    /// they cover what is under them without removing it.
     static func fillAndSign(inputURL: URL, outputURL: URL, items: [FillSignItem]) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
         try writeOutput(try fillAndSignData(inputURL: inputURL, items: items), to: outputURL)
@@ -951,8 +953,10 @@ public enum PDFToolkit {
                 // out by NSStringDrawing along the current CTM's axes — under the rotated page
                 // transform it baked sideways (and wrapped to the unswapped width) on /Rotate
                 // pages while the editor showed it upright, so text draws in display space with
-                // the display-mapped rect.
-                for item in byPage[i] ?? [] {
+                // the display-mapped rect. Patches go first, so a correction's words land on its
+                // patch whichever order the items came in.
+                let onPage = byPage[i] ?? []
+                for item in onPage.filter(\.isPatch) + onPage.filter({ !$0.isPatch }) {
                     switch item.content {
                     case .text(let text):
                         drawFillText(text, in: displayRect(item.rect, cropBox: dp.cropBox, rotation: dp.rotation), ctx: ctx)
@@ -960,6 +964,15 @@ public enum PDFToolkit {
                         ctx.saveGState()
                         ctx.concatenate(dp.transform)
                         drawFillSignature(signature, in: item.rect, ctx: ctx)
+                        ctx.restoreGState()
+                    case .patch(let patch):
+                        // A plain fill, in page space under the page transform as a signature is:
+                        // a rectangle maps exactly under every rotation.
+                        ctx.saveGState()
+                        ctx.concatenate(dp.transform)
+                        // sRGB, as text's ink is: a colour sampled off the page comes back as it was.
+                        ctx.setFillColor(CGColor(srgbRed: patch.red, green: patch.green, blue: patch.blue, alpha: 1))
+                        ctx.fill(item.rect)
                         ctx.restoreGState()
                     }
                 }
