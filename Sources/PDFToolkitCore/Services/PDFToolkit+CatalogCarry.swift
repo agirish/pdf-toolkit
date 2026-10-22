@@ -301,12 +301,15 @@ extension PDFToolkit {
             let attached = carry.fileAttachments(onPage: sourceIndex)
             guard !attached.isEmpty else { continue }
             let pageObject = outputPages[output]
-            // Already there, file and all: an in-place write kept them.
+            // Already there, file and all: an in-place write on macOS 27 kept them. (On macOS 26
+            // it keeps the file's specification and drops the file.)
             let existing = try writer.update.annotationObjects(ofPage: pageObject)
             let complete = try existing.filter { number in
                 let annotation = try writer.update.object(number).value
-                guard case .name("FileAttachment")? = annotation["Subtype"] else { return false }
-                return annotation["FS"] != nil
+                guard case .name("FileAttachment")? = annotation["Subtype"],
+                      let spec = try writer.update.resolve(annotation["FS"]),
+                      let files = try writer.update.resolve(spec["EF"]) else { return false }
+                return files["F"] != nil
             }
             if complete.count == attached.count { continue }
             var cropBox = CGRect.zero

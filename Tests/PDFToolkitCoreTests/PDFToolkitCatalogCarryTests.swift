@@ -210,7 +210,7 @@ struct PDFToolkitCatalogCarryTests {
     // MARK: Every page, in order
 
     @Test(arguments: ["cleanMetadata", "cleanMetadataCleared", "compress", "fillAndSign", "watermark",
-                      "pictures", "removePassword", "crop"])
+                      "pictures", "crop"])
     func aWholeCopyKeepsLabelsViewerSettingsLanguageAndAttachments(_ tool: String) throws {
         let dir = FixtureDir()
         let url = dir.url("source.pdf")
@@ -229,11 +229,6 @@ struct PDFToolkitCatalogCarryTests {
         case "pictures":
             data = try PDFToolkit.redactData(inputURL: url, marks: [], options: PDFRedactionExportOptions(
                 stripAnnotationsFromUnredactedPages: false, maxPixelDimension: 1000, forceRasterizePages: [0]))
-        case "removePassword":
-            let locked = dir.url("locked.pdf")
-            try PDFToolkit.encryptData(inputURL: url, options: .addPassword(restrictEditing: false, password: "pw"))
-                .write(to: locked)
-            data = try PDFToolkit.removePasswordData(inputURL: locked, password: "pw")
         case "crop": data = try PDFToolkit.cropData(inputURL: url, insets: CropInsets(top: 10, left: 10, bottom: 10, right: 10))
         default: Issue.record("unknown tool \(tool)"); return
         }
@@ -243,6 +238,53 @@ struct PDFToolkitCatalogCarryTests {
         if tool.hasPrefix("cleanMetadata") { #expect(!report.has.contains("Metadata")) }
         // The bookmark, which the copies kept before, still comes along.
         #expect(report.has.contains("Outlines"))
+    }
+
+    /// A file locked to open, with page labels, a layout, an opening view, tags and an output
+    /// intent. Not made by Protect, which on macOS 26 loses them itself: CoreGraphics encrypts the
+    /// pages, and an appended update adds the catalog entries — none with a string, which would
+    /// have to be encrypted. Its labels are "i", "ii", "1", "2".
+    static func writeLocked(to url: URL, password: String) throws {
+        let data = NSMutableData()
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let consumer = try #require(CGDataConsumer(data: data as CFMutableData))
+        let context = try #require(CGContext(consumer: consumer, mediaBox: &box, [
+            kCGPDFContextUserPassword: password, kCGPDFContextOwnerPassword: password,
+        ] as CFDictionary))
+        for _ in 0..<4 {
+            context.beginPDFPage(nil)
+            context.fill(CGRect(x: 72, y: 72, width: 100, height: 100))
+            context.endPDFPage()
+        }
+        context.closePDF()
+        var update = try PDFAppendedUpdate(data as Data)
+        let root = try update.rootObject()
+        let pages = try update.pageObjects()
+        let tags = update.addObject(Array("<< /Type /StructTreeRoot /K [] >>".utf8))
+        let intent = update.addObject(Array("<< /Type /OutputIntent /S /GTS_PDFA1 >>".utf8))
+        update.setRaw("PageLabels", to: "<< /Nums [0 << /S /r >> 2 << /S /D >>] >>", inObject: root)
+        update.setRaw("PageLayout", to: "/TwoColumnLeft", inObject: root)
+        update.setRaw("OpenAction", to: "[\(pages[2]) 0 R /XYZ 36 400 1.5]", inObject: root)
+        update.setRaw("StructTreeRoot", to: "\(tags) 0 R", inObject: root)
+        update.setRaw("OutputIntents", to: "[\(intent) 0 R]", inObject: root)
+        try update.appended().write(to: url)
+    }
+
+    /// The source is read by its password: on macOS 26 a document PDFKit unlocked doesn't unlock
+    /// its catalog, and the copy came back bare.
+    @Test func removingAPasswordKeepsTheParts() throws {
+        let dir = FixtureDir()
+        let url = dir.url("locked.pdf")
+        try Self.writeLocked(to: url, password: "pw")
+        #expect(PDFToolkit.encryptionState(of: url) == .lockedToOpen)
+        let report = try Report(try PDFToolkit.removePasswordData(inputURL: url, password: "pw"))
+        #expect(report.labels == ["i", "ii", "1", "2"])
+        #expect(report.pageLayout == "TwoColumnLeft")
+        #expect(report.opening?.page == 2)
+        #expect(report.opening?.numbers == [36, 400, 1.5])
+        expectDropped(report)
+        #expect(PDFToolkit.droppedCatalogParts(at: url).isEmpty, "a locked file was read without its password")
+        #expect(PDFToolkit.droppedCatalogParts(at: url, password: "pw") == [.tags, .outputIntent])
     }
 
     /// The tools that write in place keep everything — including the tags, layers and output
@@ -408,11 +450,6 @@ struct PDFToolkitCatalogCarryTests {
         let url = dir.url("source.pdf")
         try Self.write(to: url)
         #expect(PDFToolkit.droppedCatalogParts(at: url) == [.tags, .layers, .outputIntent])
-        // Locked, it can't be read: nothing is claimed.
-        let locked = dir.url("locked.pdf")
-        try PDFToolkit.encryptData(inputURL: url, options: .addPassword(restrictEditing: false, password: "pw")).write(to: locked)
-        #expect(PDFToolkit.droppedCatalogParts(at: locked).isEmpty)
-        #expect(PDFToolkit.droppedCatalogParts(at: locked, password: "pw") == [.tags, .layers, .outputIntent])
         let open = try #require(PDFDocument(url: url))
         #expect(PDFToolkit.droppedCatalogParts(in: open) == [.tags, .layers, .outputIntent])
         let plain = dir.url("plain.pdf")

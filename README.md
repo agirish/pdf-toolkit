@@ -198,7 +198,7 @@ compressed cross-reference stream, a form with every field kind, a nested outlin
 cropped off the origin, a scan, and both kinds of encryption. See [docs/testing-corpus.md](docs/testing-corpus.md), and
 `scripts/corpus/generate.sh` to regenerate it.
 
-All 511 tests pass on macOS 27.0.1; CI runs them on a hosted macOS 26 runner. (0.1.0 had 31 failures there, all about bookmarks, links or Info
+All 512 tests pass on macOS 27.0.1; CI runs them on a hosted macOS 26 runner. (0.1.0 had 31 failures there, all about bookmarks, links or Info
 fields surviving a PDFKit write; 0.1.1 fixed them.)
 
 ## License
