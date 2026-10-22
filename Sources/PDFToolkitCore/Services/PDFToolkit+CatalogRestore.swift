@@ -34,11 +34,31 @@ extension PDFToolkit {
     ///   single blanket mapping is wrong for half of it (measured: a bookmark into an unmarked
     ///   page with crop origin (50, 60) and `/Rotate 90` moved from (100, 400) to (340, 350) —
     ///   the right answer for a rasterized page, the wrong one for a copied page).
+    /// - Parameter carriesAttachments: whether attached files come along with the page labels,
+    ///   viewer settings and language (``carryingCatalogParts(_:from:outputToSource:displayMappedPages:attachments:)``).
     static func restoringCatalog(
         _ data: Data,
         from source: PDFDocument,
         restoreLinks: Bool,
-        displayMappedPages: Set<Int>? = nil
+        displayMappedPages: Set<Int>? = nil,
+        carriesAttachments: Bool = true
+    ) -> Data {
+        carryingCatalogParts(
+            restoringOutlineAndLinks(data, from: source, restoreLinks: restoreLinks, displayMappedPages: displayMappedPages),
+            from: source,
+            outputToSource: Array(0..<source.pageCount),
+            displayMappedPages: displayMappedPages ?? Set(0..<source.pageCount),
+            attachments: carriesAttachments
+        )
+    }
+
+    /// ``restoringCatalog(_:from:restoreLinks:displayMappedPages:carriesAttachments:)``'s first
+    /// half: bookmarks, the info dictionary and links, which PDFKit can write.
+    private static func restoringOutlineAndLinks(
+        _ data: Data,
+        from source: PDFDocument,
+        restoreLinks: Bool,
+        displayMappedPages: Set<Int>?
     ) -> Data {
         let attributes = restorableAttributes(of: source)
         let links = restoreLinks ? sourceLinks(of: source) : [:]

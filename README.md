@@ -10,7 +10,7 @@ It was cut from pdf-utils at `7828fcb`. PDF Utils itself now depends on this pac
 the same code.
 
 ```swift
-.package(url: "https://github.com/agirish/pdf-toolkit", exact: "0.4.0")
+.package(url: "https://github.com/agirish/pdf-toolkit", exact: "0.5.0")
 // target dependency:
 .product(name: "PDFToolkitCore", package: "pdf-toolkit")
 ```
@@ -61,6 +61,8 @@ Before a run, these tell you what the file is and what the run would lose:
 - `OutputFidelityWarning.detect(in:formLoss:checksBookmarks:)` says whether a run will flatten or orphan
   a form, or drop bookmarks, with the user-facing wording (`headline`, `detailLines(toolTitle:)`,
   `detail(toolTitle:)`).
+- `droppedCatalogParts(at:)` → `[DroppedCatalogPart]` (`.tags`, `.layers`, `.outputIntent`): what the
+  file has that no copy keeps (see [What a copy keeps](#what-a-copy-keeps)).
 
 Supporting types: `PageRangeParser` (`"1, 3-5"` → zero-based indices), `PDFOperationError`
 (`LocalizedError`, user-facing messages), `CropInsets`, `PDFMetadataFields`, `ProtectionOptions`,
@@ -72,6 +74,28 @@ Data variant, refuse to write over their own input, and write atomically.
 The rest of the public surface (watermark, redact, fill and sign, crop, split, merge, images to PDF,
 OCR, find-to-redact, and their option types) is public because PDF Utils calls it. It works the same
 way, but it is not part of what this package was cut for.
+
+## What a copy keeps
+
+Every tool's copy keeps the pages, bookmarks, links, the info dictionary's Title, Author, Subject,
+Keywords and Creator, and these catalog entries, which PDFKit's writer can't set and which are
+written in an appended incremental update:
+
+- **page labels** ("i, ii, 1, 2", "A-1"). Each page keeps its own label, so an extract of "iii" and
+  "4" still reads "iii" and "4", and a deleted or reordered page takes its label with it;
+- **viewer settings**: page layout, page mode, viewer preferences, and the opening view. A view on a
+  page the copy lacks opens the copy's first page at the same zoom. A script run on opening is not
+  carried;
+- **the language**;
+- **attached files**, the document's and each page's (FileAttachment annotations, file and all).
+  A redaction with marks keeps none, since a file can hold what was painted over.
+
+Tags (`/StructTreeRoot`, `/MarkInfo`), layers (`/OCProperties`) and the colour output intent
+(`/OutputIntents`) are not kept by a copy that rebuilds or re-copies its pages: tags and layers name
+page content by marked-content ids a rebuilt page no longer has, and an output intent claims a
+conformance the copy no longer meets. `droppedCatalogParts(at:)` says which a file has. Rotate,
+Protect and filling a form write the document in place and keep everything. Merge and Split carry
+none of these.
 
 ## Forms
 
@@ -172,7 +196,7 @@ compressed cross-reference stream, a form with every field kind, a nested outlin
 cropped off the origin, a scan, and both kinds of encryption. See [docs/testing-corpus.md](docs/testing-corpus.md), and
 `scripts/corpus/generate.sh` to regenerate it.
 
-All 485 tests pass on macOS 27.0.1 and on the hosted macOS 26.6.2 runner. (0.1.0 had 31 failures there, all about bookmarks, links or Info
+All 510 tests pass on macOS 27.0.1; CI runs them on a hosted macOS 26 runner. (0.1.0 had 31 failures there, all about bookmarks, links or Info
 fields surviving a PDFKit write; 0.1.1 fixed them.)
 
 ## License

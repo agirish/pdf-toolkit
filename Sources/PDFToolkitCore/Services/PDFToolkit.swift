@@ -482,7 +482,8 @@ public enum PDFToolkit {
         guard let data = out.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }
-        return data
+        // Each page keeps its own label, so an extract of "iii" and "4" still reads "iii" and "4".
+        return carryingCatalogParts(data, from: source, outputToSource: pageIndices)
     }
 
     /// Rebuilds `source`'s outline onto `output`, whose pages are a subset and/or reordering of
@@ -612,6 +613,7 @@ public enum PDFToolkit {
         pruneOutlineForDeletion(in: doc, deleting: unique)
 
         let expectedCount = doc.pageCount - unique.count
+        let survivors = (0..<doc.pageCount).filter { !unique.contains($0) }
         for index in unique.sorted(by: >) {
             doc.removePage(at: index)
         }
@@ -625,7 +627,12 @@ public enum PDFToolkit {
         guard let data = doc.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }
-        return data
+        // A write that changes the page tree comes back with a bare catalog, in place or not. The
+        // catalog is read from a second, untouched parse: `doc` has lost the deleted pages.
+        guard let source = PDFDocument(url: inputURL), !source.isLocked, source.pageCount == survivors.count + unique.count else {
+            return data
+        }
+        return carryingCatalogParts(data, from: source, outputToSource: survivors)
     }
 
     /// Rewrites `doc`'s outline in place for a page deletion: every bookmark whose destination page
@@ -824,8 +831,9 @@ public enum PDFToolkit {
         // encryption into the output, so a just-unlocked doc re-serializes to a file that is
         // still locked with the same password. Rebuild the pages into a fresh document, which
         // has no encryption dictionary, so the saved copy genuinely opens with no password.
-        // The rebuild keeps pages and the info dictionary; attachments and an interactive form
-        // dictionary still don't survive it (out of scope — the tool's UI discloses this).
+        // The rebuild keeps pages and the info dictionary, and page labels, viewer settings, the
+        // language and attached files are carried after it; an interactive form dictionary still
+        // doesn't survive it (the tool's UI discloses this).
         let output = PDFDocument()
         for i in 0..<doc.pageCount {
             guard let page = doc.page(at: i)?.copy() as? PDFPage else {
@@ -845,7 +853,7 @@ public enum PDFToolkit {
         guard output.pageCount > 0, let data = output.dataRepresentation() else {
             throw PDFOperationError.protectionFailed
         }
-        return data
+        return carryingCatalogParts(data, from: doc, outputToSource: Array(0..<doc.pageCount))
     }
 
     /// Stamps text or a logo image onto the chosen pages and writes a new PDF.
@@ -1234,11 +1242,14 @@ public enum PDFToolkit {
         // into unmarked, rotated or offset pages to the wrong spot. The set is the same test the
         // page loop above makes: marked OR force-rasterized. Deriving it from the marks alone
         // missed the force-rasterized pages, which carry no marks yet are rasterized all the same.
+        //
+        // Attached files go too when anything is marked: a file can hold what was painted over.
         return restoringCatalog(
             data,
             from: source,
             restoreLinks: false,
-            displayMappedPages: rasterized
+            displayMappedPages: rasterized,
+            carriesAttachments: marks.isEmpty
         )
     }
 
@@ -1362,8 +1373,11 @@ public enum PDFToolkit {
     /// displayed crop box's corner, rotation already upright): PDFKit's draw performs the page's
     /// display mapping internally.
     // Internal (not private): the OCR extension re-draws pages the same way watermark does.
+    //
+    // A file attachment's icon is not drawn: the annotation itself, file and all, is put back on
+    // the rebuilt page (``carryingCatalogParts(_:from:outputToSource:displayMappedPages:attachments:)``).
     static func drawAnnotations(of page: PDFPage, in ctx: CGContext) {
-        let visible = page.annotations.filter(\.shouldDisplay)
+        let visible = page.annotations.filter { $0.shouldDisplay && $0.type != "FileAttachment" }
         guard !visible.isEmpty else { return }
         let graphics = NSGraphicsContext(cgContext: ctx, flipped: false)
         NSGraphicsContext.saveGraphicsState()

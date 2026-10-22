@@ -178,7 +178,11 @@ extension PDFToolkit {
         }
         remapInternalLinksOfFullCopy(from: doc, to: clean)
         clean.documentAttributes = attributes
-        return clean.dataRepresentation()
+        // Page labels, viewer settings, the language and attached files are not metadata, and stay
+        // (an attachment keeps its own details inside it).
+        return clean.dataRepresentation().map {
+            carryingCatalogParts($0, from: doc, outputToSource: Array(0..<doc.pageCount))
+        }
     }
 
     /// How many bookmarks (outline entries, counted through the whole tree) the PDF at `url` has, or

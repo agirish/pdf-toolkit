@@ -26,8 +26,9 @@ import PDFKit
 ///
 /// A warning is only ever built when the *loaded file actually has* the thing at risk, so it stays
 /// meaningful rather than becoming permanent wallpaper. Everything else these rebuilds used to lose —
-/// bookmarks outside merge/split, the document title, links — is now preserved, so it is
-/// deliberately not listed here.
+/// bookmarks outside merge/split, the document title, links, page labels, viewer settings, the
+/// language, attached files — is now preserved, so it is deliberately not listed here. Tags, layers
+/// and the output intent still go; ``PDFToolkit/droppedCatalogParts(at:)`` reports those.
 public struct OutputFidelityWarning: Equatable, Sendable {
     /// One thing this tool's output will lose. A tool can have more than one — Merge and Split lose
     /// both a form and bookmarks.

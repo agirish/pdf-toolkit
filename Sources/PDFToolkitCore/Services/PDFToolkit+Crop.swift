@@ -74,7 +74,7 @@ extension PDFToolkit {
         guard let data = output.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }
-        return data
+        return carryingCatalogParts(data, from: source, outputToSource: Array(0..<source.pageCount))
     }
 
     /// Carries the source's outline (bookmarks) onto a rebuilt `output` that copied EVERY page in the
@@ -235,7 +235,7 @@ extension PDFToolkit {
         guard let data = output.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }
-        return data
+        return carryingCatalogParts(data, from: source, outputToSource: Array(0..<source.pageCount))
     }
 
     /// A display-only copy of `source` for the drag-to-crop marquee's live `PDFView`: every page is

@@ -1,9 +1,9 @@
 import Foundation
 
-/// Rewrites a handful of NAME values in a PDF that PDFKit has just written, by appending an
+/// Rewrites a handful of values in a PDF that PDFKit has just written, by appending an
 /// incremental update — the standard way to change a PDF without re-serializing it.
 ///
-/// It exists for one job: checkbox and radio states. PDFKit's writer cannot set a button widget
+/// It exists for two jobs. The first is checkbox and radio states. PDFKit's writer cannot set a button widget
 /// (measured on macOS 27.0.1): any change through `buttonWidgetState` or `widgetStringValue`
 /// replaces the widget's on/off appearance dictionary with one regenerated stream, writes `/V` as a
 /// string instead of a name, and leaves `/AS` naming the old state — so on reopen PDFKit itself
@@ -15,6 +15,11 @@ import Foundation
 /// each rewritten object keeps its object and generation number, which is what its encrypted
 /// strings are keyed by, so they are copied through verbatim and still decrypt.
 ///
+/// The second is the catalog entries PDFKit's writer cannot set at all — page labels, viewer
+/// settings, the language and attached files (see ``PDFToolkit/carryingCatalogParts``). Those
+/// edits take raw values and new objects, and are refused on an encrypted file
+/// (``isEncrypted``): their strings would have to be encrypted, and nothing here does that.
+///
 /// Deliberately narrow. It reads what PDFKit writes — classic cross-reference tables, every object
 /// at top level — and throws ``Failure`` on anything else rather than guessing.
 struct PDFAppendedUpdate {
@@ -24,7 +29,8 @@ struct PDFAppendedUpdate {
 
     /// A parsed value, with the byte range it occupied so it can be replaced in place.
     indirect enum Value {
-        case dict([(key: String, value: Value, range: Range<Int>)])
+        /// Each entry with the byte range of its value, and where its key starts.
+        case dict([(key: String, value: Value, range: Range<Int>, keyStart: Int)])
         case array([Value])
         case ref(Int, Int)
         case name(String)
@@ -47,8 +53,18 @@ struct PDFAppendedUpdate {
     private var trailer: Value = .other
     private var trailerRanges: [String: Range<Int>] = [:]
     private var lastXref = 0
-    /// Pending edits: object number → (key → new name).
-    private var edits: [Int: [String: String]] = [:]
+    /// Pending edits: object number → (key → what it becomes).
+    private var edits: [Int: [String: Edit]] = [:]
+    /// Objects whose whole value is replaced: object number → its new bytes.
+    private var replaced: [Int: [UInt8]] = [:]
+    /// New objects, in the order they were added: (number, bytes).
+    private var added: [(number: Int, body: [UInt8])] = []
+
+    private enum Edit {
+        case name(String)
+        case raw([UInt8])
+        case remove
+    }
 
     init(_ data: Data) throws {
         bytes = [UInt8](data)
@@ -109,6 +125,27 @@ struct PDFAppendedUpdate {
         guard let value else { return nil }
         if let (n, _) = value.ref { return try object(n).value }
         return value
+    }
+
+    /// The catalog's object number.
+    func rootObject() throws -> Int {
+        guard let root = trailer["Root"]?.ref else { throw Failure.unreadable("no /Root") }
+        return root.0
+    }
+
+    /// Whether the file is encrypted — where a raw edit's strings would need encrypting.
+    var isEncrypted: Bool { trailerRanges["Encrypt"] != nil }
+
+    /// The bytes of `key`'s value in object `number`, as written, or nil when it has no such key.
+    func rawValue(_ key: String, inObject number: Int) throws -> [UInt8]? {
+        guard case .dict(let entries) = try object(number).value,
+              let entry = entries.first(where: { $0.key == key }) else { return nil }
+        return Array(bytes[entry.range])
+    }
+
+    /// The bytes of object `number`'s whole value, as written.
+    func rawObject(_ number: Int) throws -> [UInt8] {
+        Array(bytes[try object(number).range])
     }
 
     /// The object number of every page, in page order.
@@ -176,39 +213,99 @@ struct PDFAppendedUpdate {
 
     /// Records that `key` in object `number` becomes the name `/value`.
     mutating func setName(_ key: String, to value: String, inObject number: Int) {
-        edits[number, default: [:]][key] = value
+        edits[number, default: [:]][key] = .name(value)
+    }
+
+    /// Records that `key` in object `number` becomes `raw`, a value already in PDF syntax.
+    mutating func setRaw(_ key: String, to raw: String, inObject number: Int) {
+        setRaw(key, to: Array(raw.utf8), inObject: number)
+    }
+
+    /// ``setRaw(_:to:inObject:)`` for a value's raw bytes.
+    mutating func setRaw(_ key: String, to raw: [UInt8], inObject number: Int) {
+        edits[number, default: [:]][key] = .raw(raw)
+    }
+
+    /// Records that object `number` loses `key`.
+    mutating func removeKey(_ key: String, inObject number: Int) {
+        edits[number, default: [:]][key] = .remove
+    }
+
+    /// Records that object `number`'s whole value becomes `raw`.
+    mutating func replaceObject(_ number: Int, with raw: [UInt8]) {
+        replaced[number] = raw
+    }
+
+    /// Adds an object whose value is `body` (a stream object's body ends with its `endstream`), and
+    /// returns its number.
+    mutating func addObject(_ body: [UInt8]) -> Int {
+        let number = (added.last?.number ?? max(previousSize, (xref.keys.max() ?? 0) + 1) - 1) + 1
+        added.append((number, body))
+        return number
+    }
+
+    /// Sets the bytes of an object ``addObject(_:)`` added — for one whose number had to be known
+    /// before its body was written.
+    mutating func replaceAdded(_ number: Int, with body: [UInt8]) {
+        guard let i = added.firstIndex(where: { $0.number == number }) else { return }
+        added[i].body = body
+    }
+
+    /// `/Size` from the newest trailer: free entries count too, so new numbers start past it.
+    private var previousSize: Int {
+        trailerRanges["Size"].flatMap {
+            Int(String(decoding: bytes[$0], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+        } ?? 0
     }
 
     /// The original bytes plus one incremental update carrying every recorded edit. Returns the
     /// input unchanged when nothing was recorded.
     func appended() throws -> Data {
-        guard !edits.isEmpty else { return Data(bytes) }
+        guard !edits.isEmpty || !replaced.isEmpty || !added.isEmpty else { return Data(bytes) }
         var out = bytes
         if out.last != UInt8(ascii: "\n") { out.append(UInt8(ascii: "\n")) }
         var offsets: [(Int, Int, Int)] = []   // (number, gen, offset)
-        for number in edits.keys.sorted() {
+        for number in Set(edits.keys).union(replaced.keys).sorted() {
             guard let gen = xref[number]?.gen else { throw Failure.unreadable("object \(number) not in xref") }
-            let (value, range) = try object(number)
-            guard case .dict(let entries) = value else { throw Failure.unreadable("object \(number) is not a dictionary") }
-            var body = Array(bytes[range])
-            var additions = ""
-            // Replace from the back so earlier ranges stay valid.
-            var replacements: [(Range<Int>, [UInt8])] = []
-            for (key, name) in edits[number]! {
-                let encoded = Array((" /" + Self.escapedName(name)).utf8)
-                if let entry = entries.first(where: { $0.key == key }) {
-                    replacements.append((entry.range, encoded))
-                } else {
-                    additions += " /\(key) /\(Self.escapedName(name))"
+            var body: [UInt8]
+            if let whole = replaced[number] {
+                body = whole
+            } else {
+                let (value, range) = try object(number)
+                guard case .dict(let entries) = value else { throw Failure.unreadable("object \(number) is not a dictionary") }
+                body = Array(bytes[range])
+                var additions: [UInt8] = []
+                // Replace from the back so earlier ranges stay valid.
+                var replacements: [(Range<Int>, [UInt8])] = []
+                for (key, edit) in edits[number] ?? [:] {
+                    let encoded: [UInt8]
+                    switch edit {
+                    case .name(let name): encoded = Array(("/" + Self.escapedName(name)).utf8)
+                    case .raw(let raw): encoded = raw
+                    case .remove: encoded = []
+                    }
+                    if let entry = entries.first(where: { $0.key == key }) {
+                        if case .remove = edit {
+                            replacements.append((entry.keyStart..<entry.range.upperBound, []))
+                        } else {
+                            replacements.append((entry.range, [UInt8(ascii: " ")] + encoded))
+                        }
+                    } else if !encoded.isEmpty {
+                        additions += Array(" /\(Self.escapedName(key)) ".utf8) + encoded
+                    }
                 }
+                for (r, new) in replacements.sorted(by: { $0.0.lowerBound > $1.0.lowerBound }) {
+                    body.replaceSubrange((r.lowerBound - range.lowerBound)..<(r.upperBound - range.lowerBound), with: new)
+                }
+                // The dictionary's closing `>>` is the last two bytes of its range.
+                body.insert(contentsOf: additions, at: body.count - 2)
             }
-            for (r, new) in replacements.sorted(by: { $0.0.lowerBound > $1.0.lowerBound }) {
-                body.replaceSubrange((r.lowerBound - range.lowerBound)..<(r.upperBound - range.lowerBound), with: new)
-            }
-            // The dictionary's closing `>>` is the last two bytes of its range.
-            body.insert(contentsOf: Array(additions.utf8), at: body.count - 2)
             offsets.append((number, gen, out.count))
             out += Array("\(number) \(gen) obj\n".utf8) + body + Array("\nendobj\n".utf8)
+        }
+        for (number, body) in added {
+            offsets.append((number, 0, out.count))
+            out += Array("\(number) 0 obj\n".utf8) + body + Array("\nendobj\n".utf8)
         }
         let xrefOffset = out.count
         var section = "xref\n"
@@ -216,9 +313,6 @@ struct PDFAppendedUpdate {
             section += "\(number) 1\n" + String(format: "%010d %05d n \n", offset, gen)
         }
         // Never smaller than the previous section's: `/Size` counts free entries too.
-        let previousSize = trailerRanges["Size"].flatMap {
-            Int(String(decoding: bytes[$0], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
-        } ?? 0
         let size = max(previousSize, (xref.keys.max() ?? 0) + 1, offsets.map { $0.0 + 1 }.max() ?? 0)
         section += "trailer\n<< /Size \(size)"
         for key in ["Root", "Info", "Encrypt", "ID"] {
@@ -233,8 +327,13 @@ struct PDFAppendedUpdate {
     /// A name's bytes as they must appear after `/`: delimiters, `#`, whitespace and anything
     /// outside printable ASCII written as `#xx`.
     static func escapedName(_ name: String) -> String {
+        escapedName(bytes: Array(name.utf8))
+    }
+
+    /// ``escapedName(_:)`` for a name's raw bytes, which need not be UTF-8.
+    static func escapedName<S: Sequence>(bytes name: S) -> String where S.Element == UInt8 {
         var out = ""
-        for byte in name.utf8 {
+        for byte in name {
             if byte > 0x20, byte < 0x7F, !"()<>[]{}/%#".utf8.contains(byte) {
                 out.append(Character(UnicodeScalar(byte)))
             } else {
@@ -305,7 +404,7 @@ struct PDFAppendedUpdate {
         let b = bytes[p]
         if b == UInt8(ascii: "<"), p + 1 < bytes.count, bytes[p + 1] == UInt8(ascii: "<") {
             p += 2
-            var entries: [(key: String, value: Value, range: Range<Int>)] = []
+            var entries: [(key: String, value: Value, range: Range<Int>, keyStart: Int)] = []
             while true {
                 skipSpace(&p)
                 guard p < bytes.count else { throw Failure.unreadable("unterminated dictionary") }
@@ -314,10 +413,11 @@ struct PDFAppendedUpdate {
                     p += 2
                     return (.dict(entries), p)
                 }
+                let keyStart = p
                 guard case (.name(let key), _) = try parseValue(&p) else { throw Failure.unreadable("dictionary key") }
                 let valueStart = p
                 let (value, end) = try parseValue(&p)
-                entries.append((key, value, valueStart..<end))
+                entries.append((key, value, valueStart..<end, keyStart))
             }
         }
         switch b {
