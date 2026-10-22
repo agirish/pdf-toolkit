@@ -301,15 +301,17 @@ extension PDFToolkit {
             let attached = carry.fileAttachments(onPage: sourceIndex)
             guard !attached.isEmpty else { continue }
             let pageObject = outputPages[output]
-            // Already there, file and all: an in-place write on macOS 27 kept them. (On macOS 26
-            // it keeps the file's specification and drops the file.)
+            // Already there, file and all: an in-place write on macOS 27 kept them. On macOS 26 the
+            // annotation's file specification points at an object the copy doesn't have, so a
+            // lookup that fails counts as missing, never as a reason to give up.
             let existing = try writer.update.annotationObjects(ofPage: pageObject)
-            let complete = try existing.filter { number in
-                let annotation = try writer.update.object(number).value
-                guard case .name("FileAttachment")? = annotation["Subtype"],
-                      let spec = try writer.update.resolve(annotation["FS"]),
-                      let files = try writer.update.resolve(spec["EF"]) else { return false }
-                return files["F"] != nil
+            let complete = existing.filter { number in
+                guard let annotation = try? writer.update.object(number).value,
+                      case .name("FileAttachment")? = annotation["Subtype"],
+                      let spec = try? writer.update.resolve(annotation["FS"]),
+                      let files = try? writer.update.resolve(spec["EF"]),
+                      case .ref(let file, _)? = files["F"] else { return false }
+                return (try? writer.update.object(file)) != nil
             }
             if complete.count == attached.count { continue }
             var cropBox = CGRect.zero
@@ -344,7 +346,7 @@ extension PDFToolkit {
             }
             var kept: [String] = []
             for number in existing {
-                if case .name("FileAttachment")? = try writer.update.object(number).value["Subtype"] { continue }
+                if case .name("FileAttachment")? = (try? writer.update.object(number))?.value["Subtype"] { continue }
                 kept.append("\(number) 0 R")
             }
             let array = "[" + (kept + references).joined(separator: " ") + "]"
