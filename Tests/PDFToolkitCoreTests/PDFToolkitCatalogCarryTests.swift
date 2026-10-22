@@ -108,7 +108,10 @@ struct PDFToolkitCatalogCarryTests {
             let doc = try #require(PDFDocument(data: data))
             if let password { _ = doc.unlock(withPassword: password) }
             labels = (0..<doc.pageCount).map { doc.page(at: $0)?.label ?? "" }
-            let cg = try #require(doc.documentRef)
+            // Read apart from PDFKit: on macOS 26 a document it unlocked doesn't unlock its catalog.
+            let provider = try #require(CGDataProvider(data: data as CFData))
+            let cg = try #require(CGPDFDocument(provider))
+            if let password { _ = cg.unlockWithPassword(password) }
             let catalog = try #require(cg.catalog)
             for key in ["StructTreeRoot", "MarkInfo", "OCProperties", "OutputIntents", "Metadata", "AcroForm", "Outlines"] {
                 var object: CGPDFObjectRef?
@@ -242,9 +245,24 @@ struct PDFToolkitCatalogCarryTests {
         #expect(report.has.contains("Outlines"))
     }
 
-    /// The tools that never lost anything still keep everything — including the tags, layers and
-    /// output intent, which they write in place.
-    @Test(arguments: ["rotate", "protect", "fillForm"])
+    /// The tools that write in place keep everything — including the tags, layers and output
+    /// intent on macOS 27. On macOS 26 the write loses all of it, and the four parts are carried.
+    @Test(arguments: ["rotate", "fillForm"])
+    func anInPlaceWriteKeepsTheFourParts(_ tool: String) throws {
+        let dir = FixtureDir()
+        let url = dir.url("source.pdf")
+        try Self.write(to: url, form: tool == "fillForm")
+        let data = tool == "rotate"
+            ? try PDFToolkit.rotateData(inputURL: url, pageIndices: [1], quarterTurns: 1)
+            : try PDFToolkit.fillFormData(inputURL: url, values: ["name": .text("Bo")])
+        expectEverythingKept(try Report(data))
+    }
+
+    /// Protect's copy is encrypted, which an appended update can't add to without encrypting its
+    /// strings, so it keeps what PDFKit's write keeps: everything on macOS 27, none of it on 26.
+    @Test(.enabled(if: ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27,
+                   "macOS 26's PDFKit drops these from an encrypted write"),
+          arguments: ["rotate", "protect", "fillForm"])
     func anInPlaceWriteStillKeepsEverything(_ tool: String) throws {
         let dir = FixtureDir()
         let url = dir.url("source.pdf")
@@ -394,9 +412,9 @@ struct PDFToolkitCatalogCarryTests {
         let locked = dir.url("locked.pdf")
         try PDFToolkit.encryptData(inputURL: url, options: .addPassword(restrictEditing: false, password: "pw")).write(to: locked)
         #expect(PDFToolkit.droppedCatalogParts(at: locked).isEmpty)
-        let unlocked = try #require(PDFDocument(url: locked))
-        #expect(unlocked.unlock(withPassword: "pw"))
-        #expect(PDFToolkit.droppedCatalogParts(in: unlocked) == [.tags, .layers, .outputIntent])
+        #expect(PDFToolkit.droppedCatalogParts(at: locked, password: "pw") == [.tags, .layers, .outputIntent])
+        let open = try #require(PDFDocument(url: url))
+        #expect(PDFToolkit.droppedCatalogParts(in: open) == [.tags, .layers, .outputIntent])
         let plain = dir.url("plain.pdf")
         try PDFFixtures.writePDF(pageCount: 2, to: plain)
         #expect(PDFToolkit.droppedCatalogParts(at: plain).isEmpty)

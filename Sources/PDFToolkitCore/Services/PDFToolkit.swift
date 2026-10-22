@@ -629,7 +629,7 @@ public enum PDFToolkit {
         }
         // A write that changes the page tree comes back with a bare catalog, in place or not. The
         // catalog is read from a second, untouched parse: `doc` has lost the deleted pages.
-        guard let source = PDFDocument(url: inputURL), !source.isLocked, source.pageCount == survivors.count + unique.count else {
+        guard let source = catalogSource(at: inputURL), source.numberOfPages == survivors.count + unique.count else {
             return data
         }
         return carryingCatalogParts(data, from: source, outputToSource: survivors)
@@ -735,7 +735,10 @@ public enum PDFToolkit {
         guard let data = doc.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }
-        return data
+        // On macOS 26 even this in-place write loses page labels and the rest; on 27 it keeps
+        // them, and nothing is added.
+        guard let source = catalogSource(at: inputURL) else { return data }
+        return carryingCatalogParts(data, from: source, outputToSource: Array(0..<doc.pageCount))
     }
 
     /// Writes an encrypted copy that requires `password` to open.
@@ -853,7 +856,9 @@ public enum PDFToolkit {
         guard output.pageCount > 0, let data = output.dataRepresentation() else {
             throw PDFOperationError.protectionFailed
         }
-        return carryingCatalogParts(data, from: doc, outputToSource: Array(0..<doc.pageCount))
+        // By the password: the document unlocked above doesn't unlock its catalog on macOS 26.
+        guard let source = catalogSource(at: inputURL, password: password) else { return data }
+        return carryingCatalogParts(data, from: source, outputToSource: Array(0..<doc.pageCount))
     }
 
     /// Stamps text or a logo image onto the chosen pages and writes a new PDF.

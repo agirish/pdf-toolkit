@@ -9,7 +9,9 @@ import PDFKit
 /// Every copy PDFKit writes from a fresh document, and every in-place write that changes the page
 /// tree, comes back with a bare catalog (measured on macOS 27.0.1): Extract, Reorder, Delete,
 /// Compress, Remove Password, Clean Metadata's copy, and the CGPDFContext rebuilds all lost a
-/// document's "i, ii, 1, 2" page numbers, its two-up layout, its language and its attachments.
+/// document's "i, ii, 1, 2" page numbers, its two-up layout, its language and its attachments. On
+/// macOS 26 (measured on the hosted 26.6.2 runner) every write loses them, Rotate's and a filled
+/// form's in place too, so those are carried as well.
 /// PDFKit has no API for any of them, so they are written here, in an incremental update appended
 /// to PDFKit's output (``PDFAppendedUpdate``), with values read from the source's own catalog.
 ///
@@ -19,7 +21,8 @@ import PDFKit
 /// longer meets. ``droppedCatalogParts(at:)`` says which of them a file has, for the tool to say so.
 ///
 /// Fail-safe like ``restoringCatalog(_:from:restoreLinks:displayMappedPages:)``: anything
-/// unexpected returns the copy as PDFKit wrote it.
+/// unexpected returns the copy as PDFKit wrote it. So does an encrypted copy — Protect's, and a
+/// restricted form's — whose new strings would have to be encrypted: on macOS 26 those lose them.
 extension PDFToolkit {
     /// What a file carries that no tool's copy keeps.
     public enum DroppedCatalogPart: String, CaseIterable, Sendable {
@@ -33,13 +36,21 @@ extension PDFToolkit {
 
     /// Which of the parts no copy keeps the PDF at `url` has, in ``DroppedCatalogPart`` order.
     /// Empty when it has none or can't be read. Opens the file, so call it on your PDF lane.
-    public static func droppedCatalogParts(at url: URL) -> [DroppedCatalogPart] {
-        PDFDocument(url: url).map(droppedCatalogParts(in:)) ?? []
+    /// A file locked to open needs its `password`.
+    public static func droppedCatalogParts(at url: URL, password: String? = nil) -> [DroppedCatalogPart] {
+        catalogSource(at: url, password: password).map(droppedCatalogParts(of:)) ?? []
     }
 
-    /// ``droppedCatalogParts(at:)`` for a document already open — empty while it is locked.
+    /// ``droppedCatalogParts(at:password:)`` for a document already open — empty while it is
+    /// locked, and on macOS 26 for one unlocked with a password (pass the password to
+    /// ``droppedCatalogParts(at:password:)`` there).
     public static func droppedCatalogParts(in doc: PDFDocument) -> [DroppedCatalogPart] {
-        guard !doc.isLocked, let catalog = doc.documentRef?.catalog else { return [] }
+        guard !doc.isLocked, let cg = catalogSource(of: doc) else { return [] }
+        return droppedCatalogParts(of: cg)
+    }
+
+    private static func droppedCatalogParts(of cg: CGPDFDocument) -> [DroppedCatalogPart] {
+        guard let catalog = cg.catalog else { return [] }
         var object: CGPDFObjectRef?
         return DroppedCatalogPart.allCases.filter { part in
             switch part {
@@ -72,7 +83,38 @@ extension PDFToolkit {
         displayMappedPages: Set<Int> = [],
         attachments: Bool = true
     ) -> Data {
-        guard let cg = source.documentRef, cg.isUnlocked, let catalog = cg.catalog else { return data }
+        guard let cg = catalogSource(of: source) else { return data }
+        return carryingCatalogParts(data, from: cg, outputToSource: outputToSource,
+                                    displayMappedPages: displayMappedPages, attachments: attachments)
+    }
+
+    /// The source's catalog as CoreGraphics reads it, unlocked: the open document's own, or — on
+    /// macOS 26, where unlocking a `PDFDocument` with a password leaves its `documentRef` locked —
+    /// a second read of its file.
+    static func catalogSource(of document: PDFDocument) -> CGPDFDocument? {
+        if let cg = document.documentRef, cg.isUnlocked { return cg }
+        return document.documentURL.flatMap { catalogSource(at: $0) }
+    }
+
+    /// The file at `url` as CoreGraphics reads it, unlocked with `password` — or with none, which
+    /// opens a file that only restricts editing.
+    static func catalogSource(at url: URL, password: String? = nil) -> CGPDFDocument? {
+        guard let cg = CGPDFDocument(url as CFURL) else { return nil }
+        if !cg.isUnlocked { _ = cg.unlockWithPassword(password ?? "") }
+        if !cg.isUnlocked, password != nil { _ = cg.unlockWithPassword("") }
+        return cg.isUnlocked ? cg : nil
+    }
+
+    /// ``carryingCatalogParts(_:from:outputToSource:displayMappedPages:attachments:)`` from the
+    /// source as CoreGraphics reads it.
+    static func carryingCatalogParts(
+        _ data: Data,
+        from cg: CGPDFDocument,
+        outputToSource: [Int],
+        displayMappedPages: Set<Int> = [],
+        attachments: Bool = true
+    ) -> Data {
+        guard cg.isUnlocked, let catalog = cg.catalog else { return data }
         let cgPages = (0..<cg.numberOfPages).compactMap { cg.page(at: $0 + 1) }
         let sourcePages = cgPages.compactMap(\.dictionary)
         guard sourcePages.count == cg.numberOfPages else { return data }
@@ -99,6 +141,13 @@ extension PDFToolkit {
             let isIdentity = outputToSource == Array(0..<sourcePages.count)
 
             let root = try update.rootObject()
+            // A copy of every page in order keeps what PDFKit already wrote — an in-place write on
+            // macOS 27 keeps it all — so only what's missing is added; anything else is written
+            // afresh, since a label or an opening page that moved must be moved.
+            var present = Set<String>()
+            if case .dict(let existing) = try update.object(root).value {
+                present = Set(existing.map(\.key))
+            }
             var entries: [(String, String)] = []
             if let labels = carry.pageLabels(for: outputToSource) { entries.append(("PageLabels", labels)) }
             if let preferences = carry.viewerPreferences {
@@ -121,7 +170,7 @@ extension PDFToolkit {
             }
             if let lang = carry.lang { entries.append(("Lang", writer.value(lang))) }
             if let files = carry.associatedFiles { entries.append(("AF", writer.value(files))) }
-            for (key, value) in entries {
+            for (key, value) in entries where !(isIdentity && present.contains(key)) {
                 writer.update.setRaw(key, to: value, inObject: root)
             }
             if let embedded = carry.embeddedFiles {
@@ -252,6 +301,14 @@ extension PDFToolkit {
             let attached = carry.fileAttachments(onPage: sourceIndex)
             guard !attached.isEmpty else { continue }
             let pageObject = outputPages[output]
+            // Already there, file and all: an in-place write kept them.
+            let existing = try writer.update.annotationObjects(ofPage: pageObject)
+            let complete = try existing.filter { number in
+                let annotation = try writer.update.object(number).value
+                guard case .name("FileAttachment")? = annotation["Subtype"] else { return false }
+                return annotation["FS"] != nil
+            }
+            if complete.count == attached.count { continue }
             var cropBox = CGRect.zero
             var rotation = 0
             if displayMappedPages.contains(output), let page = carry.cgPage(sourceIndex) {
@@ -283,7 +340,6 @@ extension PDFToolkit {
                 references.append("\(writer.update.addObject(Array(body.utf8))) 0 R")
             }
             var kept: [String] = []
-            let existing = try writer.update.annotationObjects(ofPage: pageObject)
             for number in existing {
                 if case .name("FileAttachment")? = try writer.update.object(number).value["Subtype"] { continue }
                 kept.append("\(number) 0 R")

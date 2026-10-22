@@ -61,7 +61,7 @@ Before a run, these tell you what the file is and what the run would lose:
 - `OutputFidelityWarning.detect(in:formLoss:checksBookmarks:)` says whether a run will flatten or orphan
   a form, or drop bookmarks, with the user-facing wording (`headline`, `detailLines(toolTitle:)`,
   `detail(toolTitle:)`).
-- `droppedCatalogParts(at:)` → `[DroppedCatalogPart]` (`.tags`, `.layers`, `.outputIntent`): what the
+- `droppedCatalogParts(at:password:)` → `[DroppedCatalogPart]` (`.tags`, `.layers`, `.outputIntent`): what the
   file has that no copy keeps (see [What a copy keeps](#what-a-copy-keeps)).
 
 Supporting types: `PageRangeParser` (`"1, 3-5"` → zero-based indices), `PDFOperationError`
@@ -93,9 +93,11 @@ written in an appended incremental update:
 Tags (`/StructTreeRoot`, `/MarkInfo`), layers (`/OCProperties`) and the colour output intent
 (`/OutputIntents`) are not kept by a copy that rebuilds or re-copies its pages: tags and layers name
 page content by marked-content ids a rebuilt page no longer has, and an output intent claims a
-conformance the copy no longer meets. `droppedCatalogParts(at:)` says which a file has. Rotate,
-Protect and filling a form write the document in place and keep everything. Merge and Split carry
-none of these.
+conformance the copy no longer meets. `droppedCatalogParts(at:password:)` says which a file has.
+Rotate, Protect and filling a form write the document in place and keep everything on macOS 27. On
+macOS 26 PDFKit's in-place write loses all of it too, so Rotate and a filled form get the four parts
+above carried like any copy. Protect's copy is encrypted and is left as PDFKit wrote it there.
+Merge and Split carry none of these.
 
 ## Forms
 
@@ -196,7 +198,7 @@ compressed cross-reference stream, a form with every field kind, a nested outlin
 cropped off the origin, a scan, and both kinds of encryption. See [docs/testing-corpus.md](docs/testing-corpus.md), and
 `scripts/corpus/generate.sh` to regenerate it.
 
-All 510 tests pass on macOS 27.0.1; CI runs them on a hosted macOS 26 runner. (0.1.0 had 31 failures there, all about bookmarks, links or Info
+All 511 tests pass on macOS 27.0.1; CI runs them on a hosted macOS 26 runner. (0.1.0 had 31 failures there, all about bookmarks, links or Info
 fields surviving a PDFKit write; 0.1.1 fixed them.)
 
 ## License

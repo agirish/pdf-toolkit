@@ -316,7 +316,10 @@ extension PDFToolkit {
             hadForm: hadForm, widgetCount: widgetCount,
             expectedItems: inked.isEmpty ? [:] : expectedItems
         )
-        return data
+        // On macOS 26 the write loses page labels and the rest; on 27 it keeps them, and nothing is
+        // added. A restricted form's copy stays encrypted and is left as it is.
+        guard let source = catalogSource(at: inputURL) else { return data }
+        return carryingCatalogParts(data, from: source, outputToSource: Array(0..<doc.pageCount))
     }
 
     private static func validate(_ value: FormFieldValue, for field: FormField) throws {
