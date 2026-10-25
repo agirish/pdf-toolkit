@@ -52,6 +52,29 @@ extension PDFToolkit {
         )
     }
 
+    /// ``restoringCatalog(_:from:restoreLinks:displayMappedPages:carriesAttachments:)`` for a
+    /// rebuild of every page in display space, which also carries the pages' comments as
+    /// annotations when `keepingComments` (Fill & Sign's ``FillSignAnnotations/keep``) — and says
+    /// whether it did: false when there were comments to keep and they could not be.
+    static func restoringCatalog(
+        _ data: Data,
+        from source: PDFDocument,
+        restoreLinks: Bool,
+        keepingComments: Bool
+    ) -> (data: Data, commentsKept: Bool) {
+        let restored = restoringOutlineAndLinks(data, from: source, restoreLinks: restoreLinks, displayMappedPages: nil)
+        let outputToSource = Array(0..<source.pageCount)
+        // Comments are read from the file afresh: PDFKit writes into the dictionaries of the
+        // document it has open as it reads their annotations (measured on macOS 27.0.1: a popup
+        // there gains its parent's `/C`), and a kept comment must be the file's own.
+        let fresh = keepingComments ? source.documentURL.flatMap { catalogSource(at: $0) } : nil
+        guard let cg = fresh ?? catalogSource(of: source) else {
+            return (restored, !keepingComments)
+        }
+        return carryingCatalogPartsReporting(restored, from: cg, outputToSource: outputToSource,
+                                             displayMappedPages: Set(outputToSource), comments: keepingComments)
+    }
+
     /// ``restoringCatalog(_:from:restoreLinks:displayMappedPages:carriesAttachments:)``'s first
     /// half: bookmarks, the info dictionary and links, which PDFKit can write.
     private static func restoringOutlineAndLinks(

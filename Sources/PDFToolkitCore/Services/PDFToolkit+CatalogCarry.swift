@@ -14,6 +14,8 @@ import PDFKit
 /// form's in place too, so those are carried as well.
 /// PDFKit has no API for any of them, so they are written here, in an incremental update appended
 /// to PDFKit's output (``PDFAppendedUpdate``), with values read from the source's own catalog.
+/// Fill & Sign's ``FillSignAnnotations/keep`` carries the pages' comments the same way
+/// (``carryPageComments(carry:writer:outputPages:outputToSource:displayMappedPages:)``).
 ///
 /// Deliberately not carried: tags (`/StructTreeRoot`, `/MarkInfo`), layers (`/OCProperties`) and
 /// the colour output intent (`/OutputIntents`). Tags and layers name page content by marked-content
@@ -114,20 +116,40 @@ extension PDFToolkit {
         displayMappedPages: Set<Int> = [],
         attachments: Bool = true
     ) -> Data {
-        guard cg.isUnlocked, let catalog = cg.catalog else { return data }
+        carryingCatalogPartsReporting(data, from: cg, outputToSource: outputToSource,
+                                      displayMappedPages: displayMappedPages, attachments: attachments).data
+    }
+
+    /// ``carryingCatalogParts(_:from:outputToSource:displayMappedPages:attachments:)``, also
+    /// carrying each source page's comments — its markup annotations and their popups — onto its
+    /// first page in the copy when `comments` (see ``carryPageComments``), and saying whether they
+    /// came along: false only when there were comments to carry and they were not, in which case
+    /// the copy is returned as PDFKit wrote it. An encrypted copy carries nothing.
+    static func carryingCatalogPartsReporting(
+        _ data: Data,
+        from cg: CGPDFDocument,
+        outputToSource: [Int],
+        displayMappedPages: Set<Int> = [],
+        attachments: Bool = true,
+        comments: Bool = false
+    ) -> (data: Data, commentsKept: Bool) {
+        guard cg.isUnlocked, let catalog = cg.catalog else { return (data, !comments) }
         let cgPages = (0..<cg.numberOfPages).compactMap { cg.page(at: $0 + 1) }
         let sourcePages = cgPages.compactMap(\.dictionary)
-        guard sourcePages.count == cg.numberOfPages else { return data }
-        let carry = SourceCatalog(catalog: catalog, pages: sourcePages, cgPages: cgPages, attachments: attachments)
-        guard carry.hasAnything else { return data }
+        guard sourcePages.count == cg.numberOfPages else { return (data, !comments) }
+        let carry = SourceCatalog(catalog: catalog, pages: sourcePages, cgPages: cgPages, attachments: attachments,
+                                  comments: comments)
+        guard carry.hasAnything else { return (data, true) }
+        // What a failure below loses: nothing of the comments when there were none to carry.
+        let failed = (data: data, commentsKept: !carry.hasComments)
 
         do {
             let update = try PDFAppendedUpdate(data)
-            guard !update.isEncrypted else { return data }
+            guard !update.isEncrypted else { return failed }
             let outputPages = try update.pageObjects()
             guard outputPages.count == outputToSource.count,
                   outputToSource.allSatisfy({ $0 >= 0 && $0 < sourcePages.count })
-            else { return data }
+            else { return failed }
 
             var firstOutput: [Int: Int] = [:]
             for (output, source) in outputToSource.enumerated() where firstOutput[source] == nil {
@@ -195,16 +217,24 @@ extension PDFToolkit {
 
             try carryPageAttachments(carry: carry, writer: writer, outputPages: outputPages,
                                      outputToSource: outputToSource, displayMappedPages: displayMappedPages)
+            let expected = try carryPageComments(carry: carry, writer: writer, outputPages: outputPages,
+                                                 outputToSource: outputToSource, displayMappedPages: displayMappedPages)
 
             let carried = try writer.update.appended()
-            // Belt and braces: the result must open, with the same pages.
+            // Belt and braces: the result must open, with the same pages — and every comment carried
+            // must be on its page, or the copy would quietly lack it.
             guard let provider = CGDataProvider(data: carried as CFData),
                   let reopened = CGPDFDocument(provider),
                   reopened.numberOfPages == outputPages.count
-            else { return data }
-            return carried
+            else { return failed }
+            for (output, count) in expected {
+                guard let page = reopened.page(at: output + 1)?.dictionary,
+                      SourceCatalog.comments(onPage: page, attachments: attachments).count == count
+                else { return failed }
+            }
+            return (carried, true)
         } catch {
-            return data
+            return failed
         }
     }
 
@@ -296,7 +326,8 @@ extension PDFToolkit {
         outputToSource: [Int],
         displayMappedPages: Set<Int>
     ) throws {
-        guard carry.attachments else { return }
+        // Kept comments include the attachments, popup and all (``carryPageComments``).
+        guard carry.attachments, !carry.keepsComments else { return }
         for (output, sourceIndex) in outputToSource.enumerated() {
             let attached = carry.fileAttachments(onPage: sourceIndex)
             guard !attached.isEmpty else { continue }
@@ -358,6 +389,76 @@ extension PDFToolkit {
         }
     }
 
+    /// Carries each source page's comments onto its first page in the copy: every annotation on it
+    /// whose subtype is in ``FillSignAnnotations/keptSubtypes``, popups with their parents, each a
+    /// new object holding the source's whole dictionary — appearance streams (their content as it
+    /// was, compressed afresh), contents, colour, author, dates, flags, `/Popup` and `/Parent`,
+    /// `/IRT` replies — with `/P` pointing at its new page. The copy's own annotations of those
+    /// subtypes are replaced; its links and widgets are left as they are.
+    ///
+    /// A page rebuilt in display space moves its comments with it: the rectangle and every point
+    /// (`/QuadPoints`, `/InkList`, `/Vertices`, `/L`, `/CL`, `/Path`) go through the same mapping as
+    /// the content; on a turned page `/RD` turns too, and each appearance stream gets a `/Matrix`
+    /// turned by the page's rotation, so it draws the way the turned page showed it. A comment
+    /// flagged not to rotate keeps its upright appearance, pinned at its upper-left corner as a
+    /// reader shows it. A reference to an annotation not carried (a reply to a form widget) becomes
+    /// `null`; a structure parent and optional-content membership are dropped, since tags and layers
+    /// don't come along.
+    ///
+    /// Returns, for each page of the copy given comments, how many it now has.
+    private static func carryPageComments(
+        carry: SourceCatalog,
+        writer: CatalogObjectWriter,
+        outputPages: [Int],
+        outputToSource: [Int],
+        displayMappedPages: Set<Int>
+    ) throws -> [Int: Int] {
+        guard carry.keepsComments else { return [:] }
+        var firstOutput: [Int: Int] = [:]
+        for (output, source) in outputToSource.enumerated() where firstOutput[source] == nil {
+            firstOutput[source] = output
+        }
+        // Every comment is numbered before any is written, so a popup and its parent, and a reply
+        // and the comment it answers, can name each other.
+        var placed: [(output: Int, sourceIndex: Int, comments: [(annotation: CGPDFDictionaryRef, number: Int)])] = []
+        for (output, sourceIndex) in outputToSource.enumerated() where firstOutput[sourceIndex] == output {
+            let comments = carry.comments(onPage: sourceIndex)
+            guard !comments.isEmpty else { continue }
+            placed.append((output, sourceIndex, comments.map { ($0, writer.reserveAnnotation($0)) }))
+        }
+        writer.nullsOtherAnnotations = true
+        defer { writer.nullsOtherAnnotations = false }
+
+        var counts: [Int: Int] = [:]
+        for page in placed {
+            let pageObject = outputPages[page.output]
+            var mapping = CommentMapping(cropBox: .zero, rotation: 0)
+            if displayMappedPages.contains(page.output), let cgPage = carry.cgPage(page.sourceIndex) {
+                mapping = CommentMapping(cropBox: cgPage.getBoxRect(.cropBox),
+                                         rotation: normalizedRotation(Int(cgPage.rotationAngle)))
+            }
+            for (annotation, number) in page.comments {
+                let body = writer.annotation(annotation, pageObject: pageObject, mapping: mapping)
+                writer.update.replaceAdded(number, with: Array(body.utf8))
+            }
+            var kept: [String] = []
+            for number in try writer.update.annotationObjects(ofPage: pageObject) {
+                if case .name(let subtype)? = (try? writer.update.object(number))?.value["Subtype"],
+                   FillSignAnnotations.keptSubtypes.contains(subtype),
+                   subtype != "FileAttachment" || carry.attachments { continue }
+                kept.append("\(number) 0 R")
+            }
+            let array = "[" + (kept + page.comments.map { "\($0.number) 0 R" }).joined(separator: " ") + "]"
+            if case .ref(let arrayObject, _)? = try writer.update.object(pageObject).value["Annots"] {
+                writer.update.replaceObject(arrayObject, with: Array(array.utf8))
+            } else {
+                writer.update.setRaw("Annots", to: array, inObject: pageObject)
+            }
+            counts[page.output] = page.comments.count
+        }
+        return counts
+    }
+
     /// A number as PDF writes it: no exponent, no trailing zeros; `null` for none.
     static func format(_ value: CGFloat?) -> String {
         guard let value, value.isFinite else { return "null" }
@@ -382,6 +483,17 @@ private struct SourceCatalog {
     let pages: [CGPDFDictionaryRef]
     let cgPages: [CGPDFPage]
     let attachments: Bool
+    /// Whether the pages' comments are carried (``PDFToolkit/carryPageComments``).
+    let keepsComments: Bool
+
+    init(catalog: CGPDFDictionaryRef, pages: [CGPDFDictionaryRef], cgPages: [CGPDFPage], attachments: Bool,
+         comments: Bool = false) {
+        self.catalog = catalog
+        self.pages = pages
+        self.cgPages = cgPages
+        self.attachments = attachments
+        self.keepsComments = comments
+    }
 
     var viewerPreferences: CGPDFDictionaryRef? { dictionary("ViewerPreferences") }
     var pageMode: String? { name("PageMode") }
@@ -410,7 +522,12 @@ private struct SourceCatalog {
     var hasAnything: Bool {
         labelRanges != nil || viewerPreferences != nil || pageMode != nil || pageLayout != nil
             || openingDestination != nil || lang != nil || embeddedFiles != nil || associatedFiles != nil
-            || pages.indices.contains { !fileAttachments(onPage: $0).isEmpty }
+            || pages.indices.contains { !fileAttachments(onPage: $0).isEmpty } || hasComments
+    }
+
+    /// Whether there are comments to carry.
+    var hasComments: Bool {
+        keepsComments && pages.indices.contains { !comments(onPage: $0).isEmpty }
     }
 
     func cgPage(_ index: Int) -> CGPDFPage? {
@@ -593,6 +710,54 @@ private struct SourceCatalog {
         }
     }
 
+    // MARK: Comments
+
+    /// Source page `index`'s comments, when they are carried.
+    func comments(onPage index: Int) -> [CGPDFDictionaryRef] {
+        guard keepsComments, index >= 0, index < pages.count else { return [] }
+        return Self.comments(onPage: pages[index], attachments: attachments)
+    }
+
+    /// A page's annotations whose subtype is in ``FillSignAnnotations/keptSubtypes``, in `/Annots`
+    /// order — a file attachment only with `attachments` — then the popups of those that `/Annots`
+    /// leaves out. A popup comes along only with its parent.
+    static func comments(onPage page: CGPDFDictionaryRef, attachments: Bool) -> [CGPDFDictionaryRef] {
+        var annots: CGPDFArrayRef?
+        guard CGPDFDictionaryGetArray(page, "Annots", &annots), let annots else { return [] }
+        var all: [(CGPDFDictionaryRef, String)] = []
+        for i in 0..<CGPDFArrayGetCount(annots) {
+            var annotation: CGPDFDictionaryRef?
+            var subtype: UnsafePointer<CChar>?
+            guard CGPDFArrayGetDictionary(annots, i, &annotation), let annotation,
+                  CGPDFDictionaryGetName(annotation, "Subtype", &subtype), let subtype else { continue }
+            all.append((annotation, String(cString: subtype)))
+        }
+        let markups = all.filter { annotation, subtype in
+            subtype != "Popup" && FillSignAnnotations.keptSubtypes.contains(subtype)
+                && (subtype != "FileAttachment" || attachments)
+        }.map(\.0)
+        let parents = Set(markups.map { identity(of: $0) })
+        var seen = parents
+        var popups: [CGPDFDictionaryRef] = []
+        for (annotation, subtype) in all where subtype == "Popup" {
+            var parent: CGPDFDictionaryRef?
+            guard CGPDFDictionaryGetDictionary(annotation, "Parent", &parent), let parent,
+                  parents.contains(identity(of: parent)), seen.insert(identity(of: annotation)).inserted else { continue }
+            popups.append(annotation)
+        }
+        var unlisted: [CGPDFDictionaryRef] = []
+        for markup in markups {
+            var popup: CGPDFDictionaryRef?
+            guard CGPDFDictionaryGetDictionary(markup, "Popup", &popup), let popup,
+                  seen.insert(identity(of: popup)).inserted else { continue }
+            unlisted.append(popup)
+        }
+        // In the page's own order, so what a reader stacks on top stays on top.
+        let order = Dictionary(all.enumerated().map { (identity(of: $0.element.0), $0.offset) },
+                               uniquingKeysWith: { first, _ in first })
+        return (markups + popups).sorted { order[identity(of: $0)]! < order[identity(of: $1)]! } + unlisted
+    }
+
     // MARK: Lookups
 
     private func dictionary(_ key: String) -> CGPDFDictionaryRef? {
@@ -613,8 +778,19 @@ private struct SourceCatalog {
 private final class CatalogObjectWriter {
     var update: PDFAppendedUpdate
     private let pageObjects: [UnsafeRawPointer: Int]
-    private var streams: [UnsafeRawPointer: Int] = [:]
+    /// Each stream's new object, by the stream and the `/Matrix` it was given (nil for its own).
+    private var streams: [StreamKey: Int] = [:]
     private var inProgress = Set<UnsafeRawPointer>()
+    /// The carried comments' new objects (``reserveAnnotation(_:)``): a reference to one is written
+    /// as a reference to its object.
+    private var annotationObjects: [UnsafeRawPointer: Int] = [:]
+    /// While set, a reference to any other annotation is written `null`, never copied in place.
+    var nullsOtherAnnotations = false
+
+    private struct StreamKey: Hashable {
+        let stream: UnsafeRawPointer
+        let matrix: String?
+    }
 
     init(update: PDFAppendedUpdate, pageObjects: [UnsafeRawPointer: Int]) {
         self.update = update
@@ -674,12 +850,20 @@ private final class CatalogObjectWriter {
     func dictionary(_ dictionary: CGPDFDictionaryRef, skipping: Set<String> = [],
                     adding: [(String, String)] = []) -> String {
         if let number = pageObjects[identity(of: dictionary)] { return "\(number) 0 R" }
+        if let number = annotationObjects[identity(of: dictionary)] { return "\(number) 0 R" }
         var type: UnsafePointer<CChar>?
         if CGPDFDictionaryGetName(dictionary, "Type", &type), let type {
             let kind = String(cString: type)
             // A page that didn't come along, or the page tree itself.
             if kind == "Page" || kind == "Pages" { return "null" }
         }
+        if nullsOtherAnnotations, Self.isAnnotation(dictionary) { return "null" }
+        return body(of: dictionary, skipping: skipping, adding: adding)
+    }
+
+    /// ``dictionary(_:skipping:adding:)``'s entries, written in place whatever the dictionary is.
+    private func body(of dictionary: CGPDFDictionaryRef, skipping: Set<String> = [],
+                      adding: [(String, String)] = []) -> String {
         let key = identity(of: dictionary)
         guard inProgress.insert(key).inserted, inProgress.count < 64 else { return "null" }
         defer { inProgress.remove(key) }
@@ -698,9 +882,10 @@ private final class CatalogObjectWriter {
         return out + " >>"
     }
 
-    /// A stream as a new object, its data decoded and deflated again — or a JPEG's left as it was.
-    func stream(_ stream: CGPDFStreamRef) -> String {
-        let key = identity(of: stream)
+    /// A stream as a new object, its data decoded and deflated again — or a JPEG's left as it was —
+    /// with its `/Matrix` replaced by `matrix` when one is given.
+    func stream(_ stream: CGPDFStreamRef, matrix: String? = nil) -> String {
+        let key = StreamKey(stream: identity(of: stream), matrix: matrix)
         if let number = streams[key] { return "\(number) 0 R" }
         guard let streamDictionary = CGPDFStreamGetDictionary(stream) else { return "null" }
         var format = CGPDFDataFormat.raw
@@ -724,11 +909,150 @@ private final class CatalogObjectWriter {
         streams[key] = placeholder
         var adding = [("Length", String(payload.count))]
         if let filter { adding.append(("Filter", filter)) }
-        let header = dictionary(streamDictionary,
-                                skipping: ["Length", "Filter", "DecodeParms", "F", "FFilter", "FDecodeParms"],
-                                adding: adding)
+        var skipping: Set<String> = ["Length", "Filter", "DecodeParms", "F", "FFilter", "FDecodeParms"]
+        if let matrix {
+            skipping.insert("Matrix")
+            adding.append(("Matrix", matrix))
+        }
+        let header = dictionary(streamDictionary, skipping: skipping, adding: adding)
         update.replaceAdded(placeholder, with: Array(header.utf8) + Array("\nstream\n".utf8) + [UInt8](payload) + Array("\nendstream".utf8))
         return "\(placeholder) 0 R"
+    }
+
+    // MARK: Comments
+
+    /// Numbers a comment's new object before anything is written, so references to it resolve.
+    func reserveAnnotation(_ annotation: CGPDFDictionaryRef) -> Int {
+        let number = update.addObject([])
+        annotationObjects[identity(of: annotation)] = number
+        return number
+    }
+
+    /// Whether a dictionary is an annotation: a `/Subtype` and a `/Rect`, and no other `/Type`.
+    private static func isAnnotation(_ dictionary: CGPDFDictionaryRef) -> Bool {
+        var subtype: UnsafePointer<CChar>?
+        var rect: CGPDFArrayRef?
+        var type: UnsafePointer<CChar>?
+        guard CGPDFDictionaryGetName(dictionary, "Subtype", &subtype),
+              CGPDFDictionaryGetArray(dictionary, "Rect", &rect) else { return false }
+        return !CGPDFDictionaryGetName(dictionary, "Type", &type) || type.map { String(cString: $0) } == "Annot"
+    }
+
+    /// A carried comment's dictionary, on page object `pageObject`, its coordinates moved by
+    /// `mapping` (see ``PDFToolkit/carryPageComments``).
+    func annotation(_ annotation: CGPDFDictionaryRef, pageObject: Int, mapping: CommentMapping) -> String {
+        var skipping: Set<String> = ["P", "StructParent", "OC"]
+        var adding: [(String, String)] = [("P", "\(pageObject) 0 R")]
+        func numbers(_ array: CGPDFArrayRef) -> [CGFloat]? {
+            var out: [CGFloat] = []
+            for i in 0..<CGPDFArrayGetCount(array) {
+                var value: CGPDFReal = 0
+                guard CGPDFArrayGetNumber(array, i, &value) else { return nil }
+                out.append(value)
+            }
+            return out
+        }
+        func numbers(_ key: String) -> [CGFloat]? {
+            var array: CGPDFArrayRef?
+            guard CGPDFDictionaryGetArray(annotation, key, &array), let array else { return nil }
+            return numbers(array)
+        }
+        func written(_ values: [CGFloat]) -> String {
+            "[" + values.map { PDFToolkit.format($0) }.joined(separator: " ") + "]"
+        }
+        func points(_ values: [CGFloat]) -> [CGFloat]? {
+            guard values.count % 2 == 0 else { return nil }
+            return stride(from: 0, to: values.count, by: 2).flatMap { i -> [CGFloat] in
+                let point = mapping.point(CGPoint(x: values[i], y: values[i + 1]))
+                return [point.x, point.y]
+            }
+        }
+        if mapping.moves {
+            var flags: CGPDFInteger = 0
+            _ = CGPDFDictionaryGetInteger(annotation, "F", &flags)
+            let upright = flags & 16 != 0   // NoRotate
+            if let rect = numbers("Rect"), rect.count == 4 {
+                let r = mapping.rect(CGRect(x: min(rect[0], rect[2]), y: min(rect[1], rect[3]),
+                                            width: abs(rect[2] - rect[0]), height: abs(rect[3] - rect[1])),
+                                     upright: upright)
+                skipping.insert("Rect")
+                adding.append(("Rect", written([r.minX, r.minY, r.maxX, r.maxY])))
+            }
+            for key in ["QuadPoints", "Vertices", "L", "CL"] {
+                if let values = numbers(key), let mapped = points(values) {
+                    skipping.insert(key)
+                    adding.append((key, written(mapped)))
+                }
+            }
+            for key in ["InkList", "Path"] {
+                var list: CGPDFArrayRef?
+                guard CGPDFDictionaryGetArray(annotation, key, &list), let list else { continue }
+                var paths: [String] = []
+                for i in 0..<CGPDFArrayGetCount(list) {
+                    var path: CGPDFArrayRef?
+                    guard CGPDFArrayGetArray(list, i, &path), let path, let values = numbers(path),
+                          let mapped = points(values) else { paths = []; break }
+                    paths.append(written(mapped))
+                }
+                if paths.count == CGPDFArrayGetCount(list) {
+                    skipping.insert(key)
+                    adding.append((key, "[" + paths.joined(separator: " ") + "]"))
+                }
+            }
+            if mapping.rotation != 0, !upright {
+                if let insets = numbers("RD"), insets.count == 4 {
+                    skipping.insert("RD")
+                    adding.append(("RD", written(mapping.insets(insets))))
+                }
+                var appearances: CGPDFDictionaryRef?
+                if CGPDFDictionaryGetDictionary(annotation, "AP", &appearances), let appearances {
+                    skipping.insert("AP")
+                    adding.append(("AP", turnedAppearances(appearances, by: mapping.turn)))
+                }
+            }
+        }
+        return body(of: annotation, skipping: skipping, adding: adding)
+    }
+
+    /// An `/AP` dictionary whose every stream — `/N`, `/R`, `/D`, or each state of one — has its
+    /// `/Matrix` followed by `turn`.
+    private func turnedAppearances(_ appearances: CGPDFDictionaryRef, by turn: CGAffineTransform) -> String {
+        func turned(_ object: CGPDFObjectRef) -> String {
+            var stream: CGPDFStreamRef?
+            guard CGPDFObjectGetValue(object, .stream, &stream), let stream,
+                  let header = CGPDFStreamGetDictionary(stream) else { return value(object) }
+            var matrix = CGAffineTransform.identity
+            var array: CGPDFArrayRef?
+            if CGPDFDictionaryGetArray(header, "Matrix", &array), let array, CGPDFArrayGetCount(array) == 6 {
+                var v = [CGPDFReal](repeating: 0, count: 6)
+                for i in 0..<6 { _ = CGPDFArrayGetNumber(array, i, &v[i]) }
+                matrix = CGAffineTransform(a: v[0], b: v[1], c: v[2], d: v[3], tx: v[4], ty: v[5])
+            }
+            let m = matrix.concatenating(turn)
+            return self.stream(stream, matrix: "[" + [m.a, m.b, m.c, m.d, m.tx, m.ty].map { PDFToolkit.format($0) }
+                .joined(separator: " ") + "]")
+        }
+        var out = "<<"
+        for (name, object) in Self.entries(of: appearances) {
+            var states: CGPDFDictionaryRef?
+            out += " /" + PDFAppendedUpdate.escapedName(name) + " "
+            if CGPDFObjectGetValue(object, .dictionary, &states), let states {
+                out += "<<" + Self.entries(of: states).map { " /" + PDFAppendedUpdate.escapedName($0.0) + " " + turned($0.1) }
+                    .joined() + " >>"
+            } else {
+                out += turned(object)
+            }
+        }
+        return out + " >>"
+    }
+
+    private static func entries(of dictionary: CGPDFDictionaryRef) -> [(String, CGPDFObjectRef)] {
+        var entries: [(String, CGPDFObjectRef)] = []
+        CGPDFDictionaryApplyBlock(dictionary, { name, object, _ in
+            entries.append((String(cString: name), object))
+            return true
+        }, nil)
+        return entries.sorted { $0.0 < $1.0 }
     }
 
     static func bytes(of string: CGPDFStringRef) -> [UInt8] {
@@ -754,5 +1078,48 @@ private final class CatalogObjectWriter {
         out.append(deflated)
         out.append(contentsOf: [UInt8(adler >> 24), UInt8((adler >> 16) & 0xFF), UInt8((adler >> 8) & 0xFF), UInt8(adler & 0xFF)])
         return out
+    }
+}
+
+/// How a carried comment's coordinates move onto a page rebuilt in display space: the crop box's
+/// corner to the origin, and the page's rotation baked upright (``PDFToolkit/displayRect``).
+struct CommentMapping {
+    let cropBox: CGRect
+    /// 0, 90, 180 or 270.
+    let rotation: Int
+
+    var moves: Bool { cropBox.origin != .zero || rotation != 0 }
+
+    func point(_ point: CGPoint) -> CGPoint {
+        PDFToolkit.displayPoint(point, cropBox: cropBox, rotation: rotation)
+    }
+
+    /// A rectangle in display space. One that doesn't turn with the page (`upright`) keeps its size
+    /// and keeps its upper-left corner where the turned page showed it.
+    func rect(_ rect: CGRect, upright: Bool) -> CGRect {
+        guard upright, rotation != 0 else { return PDFToolkit.displayRect(rect, cropBox: cropBox, rotation: rotation) }
+        let corner = point(CGPoint(x: rect.minX, y: rect.maxY))
+        return CGRect(x: corner.x, y: corner.y - rect.height, width: rect.width, height: rect.height)
+    }
+
+    /// `/RD`'s left, bottom, right and top insets, turned with the page.
+    func insets(_ v: [CGFloat]) -> [CGFloat] {
+        switch rotation {
+        case 90: return [v[1], v[2], v[3], v[0]]
+        case 180: return [v[2], v[3], v[0], v[1]]
+        case 270: return [v[3], v[0], v[1], v[2]]
+        default: return v
+        }
+    }
+
+    /// The page's rotation as a linear map, which an appearance's `/Matrix` is followed by: the
+    /// reader then fits the turned form box to the turned rectangle.
+    var turn: CGAffineTransform {
+        switch rotation {
+        case 90: return CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: 0)
+        case 180: return CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
+        case 270: return CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 0, ty: 0)
+        default: return .identity
+        }
     }
 }

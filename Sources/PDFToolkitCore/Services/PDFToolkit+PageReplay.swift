@@ -78,9 +78,13 @@ extension PDFToolkit {
     /// The overlay draws in display space — the context's base space here *is* display space, and
     /// annotation drawing maps itself there too (see ``drawAnnotations(of:in:)``). Overlays that
     /// need source space (signature polylines) concatenate `dp.transform` around their own drawing.
+    ///
+    /// - Parameter keepingAnnotations: annotation subtypes not drawn, because they are carried onto
+    ///   the page as annotations (Fill & Sign's ``FillSignAnnotations/keep``).
     static func emitDisplayedPage(
         _ dp: DisplayedPage,
         into ctx: CGContext,
+        keepingAnnotations: Set<String> = [],
         overlay: (CGContext, DisplayedPage) -> Void
     ) {
         beginDisplayedPage(ctx, box: dp.box)
@@ -88,7 +92,7 @@ extension PDFToolkit {
         ctx.concatenate(dp.transform)
         ctx.drawPDFPage(dp.cgPage)
         ctx.restoreGState()
-        drawAnnotations(of: dp.page, in: ctx)
+        drawAnnotations(of: dp.page, in: ctx, skipping: keepingAnnotations)
         overlay(ctx, dp)
         ctx.endPDFPage()
     }

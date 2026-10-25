@@ -127,6 +127,25 @@ remove them, rasterize the page with `redactData(inputURL:marks:options:)` and `
 `fillFormData` adds a patch as a borderless Square annotation, before the page's other new items so
 they are drawn over it; any app can delete it.
 
+**Comments.** `fillAndSignData(inputURL:items:)` draws a page's review comments into the redrawn
+page, where they can't be edited, and a sticky note keeps only its icon. To keep them as comments, call
+`fillAndSignData(inputURL:items:annotations: .keep)`, which returns a `FillSignOutput` (`data`, and
+`annotations`, saying what was done). The subtypes in `FillSignAnnotations.keptSubtypes` (Text, FreeText,
+Line, Square, Circle, Polygon, PolyLine, Highlight, Underline, Squiggly, StrikeOut, Stamp, Caret, Ink,
+FileAttachment, Sound, Redact, and their Popups) are then not drawn. Each one is put back on its page in
+an appended update with its whole dictionary: its appearance streams with the same content, its text,
+colour, author and dates, its `/Popup` and `/Parent` links, and the comment a reply answers (`/IRT`).
+Its `/P` names its new page. A page turned or cropped to an offset box is redrawn upright at a zero
+origin, so its comments move with it: their rectangles and points, `/RD` on a turned page, and a
+`/Matrix` on each appearance turned with the page. A comment flagged not to rotate stays upright, pinned
+at its upper-left corner. Links and form widgets come out as they do with `.flatten`. Comments sit on top
+of the placed items, where flattening put the items on top. The comments are read from the file
+afresh, because PDFKit writes into the dictionaries of a document it has open as it reads them (a
+popup gains its parent's `/C`). **When they can't be carried**, the pages are drawn again with the
+comments flattened, and `annotations` comes back `.flatten`. That happens with an encrypted copy, which an
+appended update can't add to, or anything unexpected in the copy. Fill & Sign's own copy is never
+encrypted, so in practice only the unexpected causes it. Tell the reader when it happens.
+
 **Permissions.** Filling needs `allowsFormFieldEntry`, not `allowsDocumentAssembly`: many forms
 forbid editing but allow filling (one real form surveyed for this release carries `0xf7`: form entry yes, assembly no).
 `items` also need `allowsCommenting`. Either missing throws `permissionsForbidEditing`; a locked file

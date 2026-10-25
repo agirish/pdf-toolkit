@@ -938,8 +938,41 @@ public enum PDFToolkit {
     }
 
     /// In-memory core of ``fillAndSign(inputURL:outputURL:items:)`` — like ``watermarkData``, the
-    /// CGPDFContext builds the result in memory and the core hands the bytes back.
+    /// CGPDFContext builds the result in memory and the core hands the bytes back. The pages'
+    /// comments are drawn into it (``FillSignAnnotations/flatten``).
     public static func fillAndSignData(inputURL: URL, items: [FillSignItem]) throws -> Data {
+        try fillAndSignData(inputURL: inputURL, items: items, annotations: .flatten).data
+    }
+
+    /// ``fillAndSignData(inputURL:items:)`` with a choice of what becomes of the pages' review
+    /// comments — the markup annotations in ``FillSignAnnotations/keptSubtypes``.
+    ///
+    /// With ``FillSignAnnotations/keep`` they are not drawn into the redrawn pages: each is carried
+    /// onto its page in an appended update, the way attached files are, with its whole dictionary —
+    /// appearance streams, contents, colour, author, popup and reply links — and its coordinates
+    /// moved with the page when it is redrawn upright from a turned or offset crop box. Links and
+    /// form widgets come out as under ``FillSignAnnotations/flatten``.
+    ///
+    /// When they cannot be carried (an encrypted copy, or anything unexpected in it), the pages are
+    /// drawn again with them flattened, and ``FillSignOutput/annotations`` says
+    /// ``FillSignAnnotations/flatten``.
+    public static func fillAndSignData(
+        inputURL: URL,
+        items: [FillSignItem],
+        annotations: FillSignAnnotations
+    ) throws -> FillSignOutput {
+        try fillAndSignData(inputURL: inputURL, items: items, annotations: annotations) { data, source, keep in
+            restoringCatalog(data, from: source, restoreLinks: true, keepingComments: keep)
+        }
+    }
+
+    /// The core, with the catalog pass passed in so a test can make it fail.
+    static func fillAndSignData(
+        inputURL: URL,
+        items: [FillSignItem],
+        annotations: FillSignAnnotations,
+        restoring: (Data, PDFDocument, Bool) -> (data: Data, commentsKept: Bool)
+    ) throws -> FillSignOutput {
         let inked = items.filter(\.hasInk)
         guard !inked.isEmpty else { throw PDFOperationError.noFillSignItems }
         let source = try openUnlockedDocument(at: inputURL)
@@ -950,6 +983,25 @@ public enum PDFToolkit {
             throw PDFOperationError.pageOutOfBounds(key + 1)
         }
 
+        if annotations == .keep {
+            let drawn = try fillAndSignPages(source, inputURL: inputURL, byPage: byPage,
+                                             keeping: FillSignAnnotations.keptSubtypes)
+            let restored = restoring(drawn, source, true)
+            if restored.commentsKept { return FillSignOutput(data: restored.data, annotations: .keep) }
+            // Not carried: drawn in after all, so the copy loses none of them.
+        }
+        let drawn = try fillAndSignPages(source, inputURL: inputURL, byPage: byPage, keeping: [])
+        return FillSignOutput(data: restoring(drawn, source, false).data, annotations: .flatten)
+    }
+
+    /// Every page of `source` redrawn with its items, and its annotations drawn in but for the
+    /// subtypes in `keeping`.
+    private static func fillAndSignPages(
+        _ source: PDFDocument,
+        inputURL: URL,
+        byPage: [Int: [FillSignItem]],
+        keeping: Set<String>
+    ) throws -> Data {
         let pdfData = NSMutableData()
         guard let consumer = CGDataConsumer(data: pdfData as CFMutableData),
               let ctx = CGContext(consumer: consumer, mediaBox: nil, nil)
@@ -959,7 +1011,7 @@ public enum PDFToolkit {
 
         for i in 0..<source.pageCount {
             let dp = try displayedPage(source.page(at: i), inputURL: inputURL)
-            emitDisplayedPage(dp, into: ctx) { ctx, dp in
+            emitDisplayedPage(dp, into: ctx, keepingAnnotations: keeping) { ctx, dp in
                 // Placed items draw on top of the annotations, each in the space that renders it
                 // the way the editor previewed it. Signatures are polylines: every point maps
                 // through the page transform, so rotation is handled exactly. Typed text is laid
@@ -994,7 +1046,7 @@ public enum PDFToolkit {
         ctx.closePDF()
 
         guard pdfData.length > 0 else { throw PDFOperationError.fillSignFailed }
-        return restoringCatalog(pdfData as Data, from: source, restoreLinks: true)
+        return pdfData as Data
     }
 
     /// Maps a PDF-user-space rect into displayed-page coordinates (origin at the displayed crop
@@ -1381,8 +1433,12 @@ public enum PDFToolkit {
     //
     // A file attachment's icon is not drawn: the annotation itself, file and all, is put back on
     // the rebuilt page (``carryingCatalogParts(_:from:outputToSource:displayMappedPages:attachments:)``).
-    static func drawAnnotations(of page: PDFPage, in ctx: CGContext) {
-        let visible = page.annotations.filter { $0.shouldDisplay && $0.type != "FileAttachment" }
+    //
+    // `skipping` names subtypes not drawn because they too are carried as annotations.
+    static func drawAnnotations(of page: PDFPage, in ctx: CGContext, skipping: Set<String> = []) {
+        let visible = page.annotations.filter {
+            $0.shouldDisplay && $0.type != "FileAttachment" && !skipping.contains($0.type ?? "")
+        }
         guard !visible.isEmpty else { return }
         let graphics = NSGraphicsContext(cgContext: ctx, flipped: false)
         NSGraphicsContext.saveGraphicsState()
