@@ -1434,10 +1434,29 @@ public enum PDFToolkit {
     // A file attachment's icon is not drawn: the annotation itself, file and all, is put back on
     // the rebuilt page (``carryingCatalogParts(_:from:outputToSource:displayMappedPages:attachments:)``).
     //
-    // `skipping` names subtypes not drawn because they too are carried as annotations.
+    // `skipping` names subtypes not drawn because they too are carried as annotations. A popup is
+    // carried only with its parent (``SourceCatalog/comments(onPage:attachments:)``): one whose
+    // parent is a link, a widget or nothing at all is drawn, as it would be flattened, rather than
+    // left out of both.
     static func drawAnnotations(of page: PDFPage, in ctx: CGContext, skipping: Set<String> = []) {
-        let visible = page.annotations.filter {
-            $0.shouldDisplay && $0.type != "FileAttachment" && !skipping.contains($0.type ?? "")
+        let annotations = page.annotations
+        let isParent = { (annotation: PDFAnnotation) in
+            annotation.type != "Popup" && skipping.contains(annotation.type ?? "")
+        }
+        var carriedPopups = Set<ObjectIdentifier>()
+        if skipping.contains("Popup") {
+            for annotation in annotations {
+                if isParent(annotation), let popup = annotation.popup { carriedPopups.insert(ObjectIdentifier(popup)) }
+                if annotation.type == "Popup",
+                   let parent = annotation.value(forAnnotationKey: .parent) as? PDFAnnotation, isParent(parent) {
+                    carriedPopups.insert(ObjectIdentifier(annotation))
+                }
+            }
+        }
+        let visible = annotations.filter {
+            guard $0.shouldDisplay, $0.type != "FileAttachment" else { return false }
+            guard skipping.contains($0.type ?? "") else { return true }
+            return $0.type == "Popup" && !carriedPopups.contains(ObjectIdentifier($0))
         }
         guard !visible.isEmpty else { return }
         let graphics = NSGraphicsContext(cgContext: ctx, flipped: false)
